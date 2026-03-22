@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+/* Safe area for iPhone notch / home bar */
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Prevent text size inflation on iOS */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Smooth scrolling everywhere */
+* {
+  -webkit-tap-highlight-color: transparent;
+}

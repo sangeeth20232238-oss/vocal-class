@@ -1,0 +1,250 @@
+// src/components/StudentProfile.jsx
+import { useState, useEffect } from "react";
+import { X, Phone, MapPin, Calendar, CreditCard, TrendingUp } from "lucide-react";
+import { getAttendanceForStudent, getPayments, updateStudent } from "../firestoreService";
+import { LOCATION_SCHEDULE } from "../scheduleConfig";
+import toast from "react-hot-toast";
+
+const fmtDate = (ts) => {
+  if (!ts?.seconds) return "—";
+  return new Date(ts.seconds * 1000).toLocaleDateString("en-LK", {
+    day: "numeric", month: "short", year: "numeric",
+  });
+};
+
+const fmtJoined = (ts) => {
+  if (!ts?.seconds) return "—";
+  return new Date(ts.seconds * 1000).toLocaleDateString("en-LK", {
+    month: "long", year: "numeric",
+  });
+};
+
+export default function StudentProfile({ student, onClose, onUpdated }) {
+  const [attendance, setAttendance] = useState([]);
+  const [payments, setPayments]     = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [editing, setEditing]       = useState(false);
+  const [editName, setEditName]     = useState(student.name);
+  const [editPhone, setEditPhone]   = useState(student.phone || "");
+  const [saving, setSaving]         = useState(false);
+
+  useEffect(() => {
+    Promise.all([getAttendanceForStudent(student.id), getPayments()])
+      .then(([att, pay]) => {
+        setAttendance(att);
+        setPayments(pay.filter((p) => p.studentId === student.id)
+          .sort((a, b) => (b.paidAt?.seconds || 0) - (a.paidAt?.seconds || 0)));
+      })
+      .finally(() => setLoading(false));
+  }, [student.id]);
+
+  const handleSave = async () => {
+    if (!editName.trim()) { toast.error("Name cannot be empty."); return; }
+    setSaving(true);
+    try {
+      await updateStudent(student.id, { name: editName.trim(), phone: editPhone.trim() });
+      toast.success("Profile updated!");
+      setEditing(false);
+      onUpdated();
+    } catch { toast.error("Could not update. Please try again."); }
+    finally { setSaving(false); }
+  };
+
+  const presentCount = attendance.filter((r) => r.status === "present").length;
+  const absentCount  = attendance.filter((r) => r.status === "absent").length;
+  const totalMarked  = presentCount + absentCount;
+  const attendRate   = totalMarked > 0 ? Math.round((presentCount / totalMarked) * 100) : 0;
+
+  const schedule = LOCATION_SCHEDULE[student.location];
+  const recentMonths = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - i);
+    return d.toISOString().slice(0, 7);
+  }).reverse();
+
+  const totalPaid    = payments.reduce((s, p) => s + Number(p.amount), 0);
+  const annualCount  = payments.filter((p) => p.paymentType === "annual").length;
+  const monthlyCount = payments.filter((p) => p.paymentType !== "annual").length;
+
+  const rateColor = attendRate >= 75 ? "bg-green-500" : attendRate >= 50 ? "bg-amber-400" : "bg-red-400";
+  const rateText  = attendRate >= 75 ? "text-green-700" : attendRate >= 50 ? "text-amber-600" : "text-red-600";
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-blue-950/70 backdrop-blur-sm" />
+      <div
+        className="relative bg-white w-full sm:max-w-2xl sm:rounded-3xl rounded-t-3xl shadow-2xl max-h-[92vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="bg-gradient-to-r from-blue-700 to-indigo-700 sm:rounded-t-3xl rounded-t-3xl px-4 sm:px-6 py-4 sm:py-5 text-white sticky top-0 z-10">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-white/20 flex items-center justify-center text-2xl sm:text-3xl font-extrabold shadow-lg shrink-0">
+                {student.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                {editing ? (
+                  <input value={editName} onChange={(e) => setEditName(e.target.value)}
+                    className="text-lg sm:text-2xl font-extrabold bg-white/20 rounded-xl px-3 py-1 text-white focus:outline-none w-full"
+                    autoFocus />
+                ) : (
+                  <h2 className="text-lg sm:text-2xl font-extrabold truncate">{student.name}</h2>
+                )}
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <span className="flex items-center gap-1 text-blue-200 text-xs">
+                    <MapPin size={12} /> {student.location}
+                  </span>
+                  {schedule && (
+                    <span className="flex items-center gap-1 text-blue-200 text-xs">
+                      <Calendar size={12} /> {schedule.label}
+                    </span>
+                  )}
+                  <span className="text-blue-200 text-xs">Joined {fmtJoined(student.createdAt)}</span>
+                </div>
+              </div>
+            </div>
+            <button onClick={onClose} className="text-white/70 hover:text-white p-1 rounded-xl hover:bg-white/10 shrink-0">
+              <X size={22} />
+            </button>
+          </div>
+
+          <div className="mt-2 flex items-center gap-2">
+            <Phone size={14} className="text-blue-300 shrink-0" />
+            {editing ? (
+              <input value={editPhone} onChange={(e) => setEditPhone(e.target.value)}
+                placeholder="Phone number"
+                className="bg-white/20 rounded-xl px-3 py-1 text-white text-sm focus:outline-none" />
+            ) : (
+              <span className="text-blue-200 text-sm">{student.phone || "No phone number"}</span>
+            )}
+          </div>
+
+          <div className="mt-2 flex gap-2">
+            {editing ? (
+              <>
+                <button onClick={handleSave} disabled={saving}
+                  className="bg-white text-blue-700 font-bold px-3 py-1.5 rounded-xl text-xs hover:bg-blue-50 disabled:opacity-60">
+                  {saving ? "Saving…" : "Save Changes"}
+                </button>
+                <button onClick={() => { setEditing(false); setEditName(student.name); setEditPhone(student.phone || ""); }}
+                  className="bg-white/20 text-white font-semibold px-3 py-1.5 rounded-xl text-xs hover:bg-white/30">
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setEditing(true)}
+                className="bg-white/20 hover:bg-white/30 text-white font-semibold px-3 py-1.5 rounded-xl text-xs transition-colors">
+                Edit Profile
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+          {loading ? (
+            <div className="text-center py-10 text-blue-400">Loading profile&hellip;</div>
+          ) : (
+            <>
+              {/* Stats Row */}
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                <div className="bg-blue-50 rounded-2xl p-3 sm:p-4 text-center border border-blue-100">
+                  <div className="text-xl sm:text-2xl font-extrabold text-blue-700">{presentCount}</div>
+                  <div className="text-xs text-blue-500 font-medium mt-0.5">Attended</div>
+                </div>
+                <div className={`rounded-2xl p-3 sm:p-4 text-center border ${attendRate >= 75 ? "bg-green-50 border-green-100" : attendRate >= 50 ? "bg-amber-50 border-amber-100" : "bg-red-50 border-red-100"}`}>
+                  <div className={`text-xl sm:text-2xl font-extrabold ${rateText}`}>{attendRate}%</div>
+                  <div className="text-xs text-slate-500 font-medium mt-0.5">Rate</div>
+                </div>
+                <div className="bg-green-50 rounded-2xl p-3 sm:p-4 text-center border border-green-100">
+                  <div className="text-xl sm:text-2xl font-extrabold text-green-700">Rs.{(totalPaid / 1000).toFixed(1)}k</div>
+                  <div className="text-xs text-green-500 font-medium mt-0.5">Total Paid</div>
+                </div>
+              </div>
+
+              {/* Attendance bar */}
+              {totalMarked > 0 && (
+                <div>
+                  <div className="flex justify-between text-sm font-semibold text-blue-800 mb-1.5">
+                    <span className="flex items-center gap-1"><TrendingUp size={16} /> Attendance</span>
+                    <span className={rateText}>{presentCount}/{totalMarked}</span>
+                  </div>
+                  <div className="w-full bg-blue-100 rounded-full h-4 overflow-hidden">
+                    <div className={`${rateColor} h-4 rounded-full transition-all duration-700`}
+                      style={{ width: `${Math.max(attendRate, 3)}%` }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Last 6 months heatmap */}
+              <div>
+                <h4 className="text-sm sm:text-base font-bold text-blue-800 mb-2 flex items-center gap-2">
+                  <Calendar size={16} /> Last 6 Months
+                </h4>
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 sm:gap-2">
+                  {recentMonths.map((m) => {
+                    const monthAtt = attendance.filter((r) => r.date?.startsWith(m));
+                    const present  = monthAtt.filter((r) => r.status === "present").length;
+                    const total    = monthAtt.length;
+                    const rate     = total > 0 ? Math.round((present / total) * 100) : null;
+                    const label    = new Date(m + "-01").toLocaleDateString("en-LK", { month: "short" });
+                    return (
+                      <div key={m} className={`rounded-xl p-2 sm:p-3 text-center border ${
+                        rate === null ? "bg-slate-50 border-slate-100" :
+                        rate >= 75 ? "bg-green-100 border-green-200" :
+                        rate >= 50 ? "bg-amber-100 border-amber-200" : "bg-red-100 border-red-200"
+                      }`}>
+                        <div className="text-xs font-bold text-slate-600">{label}</div>
+                        <div className={`text-sm sm:text-base font-extrabold mt-0.5 ${
+                          rate === null ? "text-slate-300" :
+                          rate >= 75 ? "text-green-700" : rate >= 50 ? "text-amber-600" : "text-red-600"
+                        }`}>
+                          {rate === null ? "—" : `${rate}%`}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Payment History */}
+              <div>
+                <h4 className="text-sm sm:text-base font-bold text-blue-800 mb-2 flex items-center gap-2">
+                  <CreditCard size={16} /> Payment History
+                  <span className="ml-auto text-xs font-normal text-blue-400">
+                    {annualCount} annual &middot; {monthlyCount} monthly
+                  </span>
+                </h4>
+                {payments.length === 0 ? (
+                  <p className="text-slate-400 text-sm text-center py-4">No payments recorded yet.</p>
+                ) : (
+                  <ul className="divide-y divide-blue-50">
+                    {payments.map((p) => (
+                      <li key={p.id} className="py-2.5 flex justify-between items-center gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                              p.paymentType === "annual" ? "bg-indigo-100 text-indigo-700" : "bg-green-100 text-green-700"
+                            }`}>
+                              {p.paymentType === "annual" ? "Annual" : "Monthly"}
+                            </span>
+                            <span className="text-sm font-semibold text-blue-900">{p.month}</span>
+                          </div>
+                          {p.deduction > 0 && (
+                            <span className="text-xs text-amber-600">&minus;Rs.{Number(p.deduction).toLocaleString()} deducted</span>
+                          )}
+                          <div className="text-xs text-slate-400">{fmtDate(p.paidAt)}</div>
+                        </div>
+                        <span className="text-sm sm:text-base font-extrabold text-green-700 shrink-0">Rs.{Number(p.amount).toLocaleString()}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
