@@ -15,6 +15,9 @@ export const getStudents = async () => {
 
 export const deleteStudent = (id) => deleteDoc(doc(db, "students", id));
 
+export const updateStudent = (id, data) =>
+  setDoc(doc(db, "students", id), data, { merge: true });
+
 // ── Attendance ────────────────────────────────────────────────────────────────
 export const setAttendance = (studentId, date, status, location) =>
   setDoc(doc(db, "attendance", `${studentId}_${date}`), {
@@ -27,7 +30,6 @@ export const getAttendanceForDate = async (date) => {
   return Object.fromEntries(snap.docs.map((d) => [d.data().studentId, d.data().status]));
 };
 
-// Returns all attendance records for a given YYYY-MM month prefix
 export const getAttendanceForMonth = async (monthPrefix) => {
   const snap = await getDocs(collection(db, "attendance"));
   return snap.docs
@@ -35,23 +37,41 @@ export const getAttendanceForMonth = async (monthPrefix) => {
     .filter((r) => r.date && r.date.startsWith(monthPrefix));
 };
 
-// ── Fees ──────────────────────────────────────────────────────────────────────
-export const recordPayment = (studentId, studentName, month, amount, location, paymentType = "monthly", deduction = 0) =>
-  addDoc(collection(db, "payments"), {
-    studentId, studentName, month, amount: Number(amount), location,
-    paymentType, deduction: Number(deduction), paidAt: serverTimestamp(),
-  });
-
-export const updateStudent = (id, data) =>
-  setDoc(doc(db, "students", id), data, { merge: true });
-
 export const getAttendanceForStudent = async (studentId) => {
   const q = query(collection(db, "attendance"), where("studentId", "==", studentId));
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };
 
+// ── Payments ──────────────────────────────────────────────────────────────────
+// paymentType: "monthly" | "term" | "scholarship"
+export const recordPayment = (studentId, studentName, month, amount, location, paymentType = "monthly", deduction = 0) =>
+  addDoc(collection(db, "payments"), {
+    studentId, studentName, month, amount: Number(amount), location,
+    paymentType, deduction: Number(deduction), paidAt: serverTimestamp(),
+  });
+
 export const getPayments = async () => {
   const snap = await getDocs(collection(db, "payments"));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+};
+
+// ── Progress Notes ────────────────────────────────────────────────────────────
+// docId = studentId_YYYY-MM-WW  (WW = week number within month, 1-based)
+export const saveProgressNote = (studentId, studentName, location, yearMonth, weekNum, note) =>
+  setDoc(doc(db, "progress", `${studentId}_${yearMonth}_W${weekNum}`), {
+    studentId, studentName, location, yearMonth, weekNum, note,
+    updatedAt: serverTimestamp(),
+  });
+
+export const getProgressForStudent = async (studentId) => {
+  const q = query(collection(db, "progress"), where("studentId", "==", studentId));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+};
+
+export const getProgressForMonth = async (yearMonth) => {
+  const q = query(collection(db, "progress"), where("yearMonth", "==", yearMonth));
+  const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };

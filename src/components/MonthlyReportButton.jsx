@@ -4,15 +4,26 @@ import { Send, FileSpreadsheet, X, CheckCircle } from "lucide-react";
 import emailjs from "@emailjs/browser";
 import toast from "react-hot-toast";
 import { generateMonthlyReport, generateEmailSummary } from "../reportGenerator";
-import { getAttendanceForMonth, getPayments } from "../firestoreService";
+import { getAttendanceForMonth, getPayments, getProgressForMonth } from "../firestoreService";
 
 const EMAILJS_SERVICE_ID  = "service_ettqbku";
 const EMAILJS_TEMPLATE_ID = "template_hi73tl8";
 const EMAILJS_PUBLIC_KEY  = "rw0wpKL1JcGxqm1WH";
-const REPORT_EMAIL        = "enochmessi3@gmail.com";
+const REPORT_EMAIL        = "adelebeling@gmail.com";
 
 const monthLabel = (m) =>
   new Date(m + "-01").toLocaleDateString("en-LK", { month: "long", year: "numeric" });
+
+function downloadExcel(excelBase64, month) {
+  const blob = new Blob(
+    [Uint8Array.from(atob(excelBase64), (c) => c.charCodeAt(0))],
+    { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
+  );
+  const url  = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url; link.download = `Vocal_Class_Report_${month}.xlsx`; link.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function MonthlyReportButton({ month, students, locations }) {
   const [open, setOpen]       = useState(false);
@@ -22,9 +33,13 @@ export default function MonthlyReportButton({ month, students, locations }) {
   const handlePreview = async () => {
     setLoading(true);
     try {
-      const [att, pay] = await Promise.all([getAttendanceForMonth(month), getPayments()]);
+      const [att, pay, prog] = await Promise.all([
+        getAttendanceForMonth(month),
+        getPayments(),
+        getProgressForMonth(month),
+      ]);
       const summary = generateEmailSummary(month, students, att, pay, locations);
-      setPreview({ att, pay, summary });
+      setPreview({ att, pay, prog, summary });
       setOpen(true);
     } catch {
       toast.error("Could not load data. Check your connection.");
@@ -35,16 +50,9 @@ export default function MonthlyReportButton({ month, students, locations }) {
     if (!preview) return;
     setLoading(true);
     try {
-      const { att, pay, summary } = preview;
-      const excelBase64 = generateMonthlyReport(month, students, att, pay, locations);
-      const blob = new Blob(
-        [Uint8Array.from(atob(excelBase64), (c) => c.charCodeAt(0))],
-        { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
-      );
-      const url  = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url; link.download = `Vocal_Class_Report_${month}.xlsx`; link.click();
-      URL.revokeObjectURL(url);
+      const { att, pay, prog, summary } = preview;
+      const excelBase64 = generateMonthlyReport(month, students, att, pay, locations, prog);
+      downloadExcel(excelBase64, month);
 
       await emailjs.send(
         EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID,
@@ -62,16 +70,13 @@ export default function MonthlyReportButton({ month, students, locations }) {
   const handleDownloadOnly = async () => {
     setLoading(true);
     try {
-      const [att, pay] = await Promise.all([getAttendanceForMonth(month), getPayments()]);
-      const excelBase64 = generateMonthlyReport(month, students, att, pay, locations);
-      const blob = new Blob(
-        [Uint8Array.from(atob(excelBase64), (c) => c.charCodeAt(0))],
-        { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
-      );
-      const url  = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url; link.download = `Vocal_Class_Report_${month}.xlsx`; link.click();
-      URL.revokeObjectURL(url);
+      const [att, pay, prog] = await Promise.all([
+        getAttendanceForMonth(month),
+        getPayments(),
+        getProgressForMonth(month),
+      ]);
+      const excelBase64 = generateMonthlyReport(month, students, att, pay, locations, prog);
+      downloadExcel(excelBase64, month);
       toast.success("Excel report downloaded!");
     } catch {
       toast.error("Could not generate report.");
@@ -131,11 +136,11 @@ export default function MonthlyReportButton({ month, students, locations }) {
               </div>
 
               <div className="bg-slate-50 rounded-xl px-4 py-3">
-                <div className="text-xs font-bold text-slate-600 mb-2">Report includes:</div>
+                <div className="text-xs font-bold text-slate-600 mb-2">Excel report includes:</div>
                 <ul className="space-y-1 text-xs text-slate-700">
-                  <li>Summary sheet — all cities, totals, pending</li>
+                  <li>✅ Summary — all cities, totals, pending</li>
                   {locations.map((loc) => (
-                    <li key={loc}>{loc} — Attendance + Payments sheet</li>
+                    <li key={loc}>📍 {loc} — Attendance + Payments + Progress Notes</li>
                   ))}
                 </ul>
               </div>

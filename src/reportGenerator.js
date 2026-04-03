@@ -12,7 +12,13 @@ const fmtDate = (ts) => {
 const monthLabel = (m) =>
   new Date(m + "-01").toLocaleDateString("en-LK", { month: "long", year: "numeric" });
 
-export function generateMonthlyReport(month, students, attendanceData, payments, locations) {
+const payTypeLabel = (t) => {
+  if (t === "term" || t === "annual") return "Term Fee";
+  if (t === "scholarship") return "Scholarship (Free)";
+  return "Monthly";
+};
+
+export function generateMonthlyReport(month, students, attendanceData, payments, locations, progressNotes = []) {
   const wb = XLSX.utils.book_new();
 
   // ── Sheet 1: Summary ──────────────────────────────────────────────────────
@@ -21,17 +27,17 @@ export function generateMonthlyReport(month, students, attendanceData, payments,
     [`Month: ${monthLabel(month)}`],
     [`Generated: ${new Date().toLocaleDateString("en-LK", { day: "numeric", month: "long", year: "numeric" })}`],
     [],
-    ["Location", "Total Students", "Classes Held", "Present (total)", "Absent (total)", "Monthly Fees (Rs.)", "Annual Fees (Rs.)", "Total Collected (Rs.)", "Pending Students"],
+    ["Location", "Total Students", "Classes Held", "Present (total)", "Absent (total)",
+     "Monthly Fees (Rs.)", "Term Fees (Rs.)", "Scholarships", "Total Collected (Rs.)", "Pending Students"],
   ];
 
   let grandTotal = 0;
 
   locations.forEach((loc) => {
-    const locStudents   = students.filter((s) => s.location === loc);
+    const locStudents    = students.filter((s) => s.location === loc);
     const scheduledDates = getScheduledDates(loc, month);
-    const today         = new Date().toISOString().split("T")[0];
-    const passedDates   = scheduledDates.filter((d) => d <= today);
-    const classesHeld   = passedDates.length;
+    const today          = new Date().toISOString().split("T")[0];
+    const passedDates    = scheduledDates.filter((d) => d <= today);
 
     let totalPresent = 0, totalAbsent = 0;
     locStudents.forEach((s) => {
@@ -42,29 +48,30 @@ export function generateMonthlyReport(month, students, attendanceData, payments,
       });
     });
 
-    const locPayments  = payments.filter((p) => p.month === month && p.location === loc);
-    const monthlyFees  = locPayments.filter((p) => p.paymentType !== "annual").reduce((s, p) => s + Number(p.amount), 0);
-    const annualFees   = locPayments.filter((p) => p.paymentType === "annual").reduce((s, p) => s + Number(p.amount), 0);
-    const totalCollected = monthlyFees + annualFees;
-    const paidIds      = new Set(locPayments.map((p) => p.studentId));
-    const pendingCount = locStudents.filter((s) => !paidIds.has(s.id)).length;
+    const locPayments    = payments.filter((p) => p.month === month && p.location === loc);
+    const monthlyFees    = locPayments.filter((p) => p.paymentType === "monthly").reduce((s, p) => s + Number(p.amount), 0);
+    const termFees       = locPayments.filter((p) => p.paymentType === "term" || p.paymentType === "annual").reduce((s, p) => s + Number(p.amount), 0);
+    const scholarCount   = locPayments.filter((p) => p.paymentType === "scholarship").length;
+    const totalCollected = monthlyFees + termFees;
+    const paidIds        = new Set(locPayments.map((p) => p.studentId));
+    const pendingCount   = locStudents.filter((s) => !paidIds.has(s.id)).length;
 
     grandTotal += totalCollected;
 
     summaryRows.push([
-      loc, locStudents.length, classesHeld, totalPresent, totalAbsent,
-      monthlyFees, annualFees, totalCollected, pendingCount,
+      loc, locStudents.length, passedDates.length, totalPresent, totalAbsent,
+      monthlyFees, termFees, scholarCount, totalCollected, pendingCount,
     ]);
   });
 
   summaryRows.push([]);
-  summaryRows.push(["", "", "", "", "", "", "", "GRAND TOTAL (Rs.)", grandTotal]);
+  summaryRows.push(["", "", "", "", "", "", "", "", "GRAND TOTAL (Rs.)", grandTotal]);
 
   const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
-  wsSummary["!cols"] = [20, 16, 14, 16, 14, 20, 18, 22, 18].map((w) => ({ wch: w }));
+  wsSummary["!cols"] = [18, 14, 13, 15, 13, 18, 16, 13, 20, 16].map((w) => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
 
-  // ── One sheet per location: Attendance ───────────────────────────────────
+  // ── Per location: Attendance sheet ───────────────────────────────────────
   locations.forEach((loc) => {
     const locStudents    = students.filter((s) => s.location === loc);
     const scheduledDates = getScheduledDates(loc, month);
@@ -73,7 +80,6 @@ export function generateMonthlyReport(month, students, attendanceData, payments,
 
     if (locStudents.length === 0) return;
 
-    // Header row: Name | Phone | date1 | date2 | ... | Total Present | %
     const dateHeaders = passedDates.map((d) => {
       const day = new Date(d + "T00:00:00");
       return `${day.getDate()} ${day.toLocaleDateString("en-LK", { weekday: "short" })}`;
@@ -97,13 +103,11 @@ export function generateMonthlyReport(month, students, attendanceData, payments,
     });
 
     const wsAtt = XLSX.utils.aoa_to_sheet(attRows);
-    wsAtt["!cols"] = [22, 14, ...dateHeaders.map(() => ({ wch: 6 })), 10, 8, 8].map((w) =>
-      typeof w === "number" ? { wch: w } : w
-    );
+    wsAtt["!cols"] = [22, 14, ...dateHeaders.map(() => 6), 10, 8, 8].map((w) => ({ wch: w }));
     XLSX.utils.book_append_sheet(wb, wsAtt, `${loc} Attendance`);
   });
 
-  // ── One sheet per location: Payments ─────────────────────────────────────
+  // ── Per location: Payments sheet ─────────────────────────────────────────
   locations.forEach((loc) => {
     const locPayments = payments
       .filter((p) => p.month === month && p.location === loc)
@@ -120,19 +124,20 @@ export function generateMonthlyReport(month, students, attendanceData, payments,
     ];
 
     locPayments.forEach((p) => {
+      const isScholar = p.paymentType === "scholarship";
       payRows.push([
         p.studentName,
-        p.paymentType === "annual" ? "Annual" : "Monthly",
-        Number(p.amount) + Number(p.deduction || 0),
-        Number(p.deduction || 0),
-        Number(p.amount),
+        payTypeLabel(p.paymentType),
+        isScholar ? "FREE" : Number(p.amount) + Number(p.deduction || 0),
+        isScholar ? 0 : Number(p.deduction || 0),
+        isScholar ? "Scholarship" : Number(p.amount),
         fmtDate(p.paidAt),
       ]);
     });
 
-    const total = locPayments.reduce((s, p) => s + Number(p.amount), 0);
+    const total = locPayments.filter((p) => p.paymentType !== "scholarship").reduce((s, p) => s + Number(p.amount), 0);
     payRows.push([]);
-    payRows.push(["TOTAL COLLECTED", "", "", "", total, ""]);
+    payRows.push(["TOTAL COLLECTED (excl. scholarships)", "", "", "", total, ""]);
 
     if (pending.length > 0) {
       payRows.push([]);
@@ -141,18 +146,49 @@ export function generateMonthlyReport(month, students, attendanceData, payments,
     }
 
     const wsPay = XLSX.utils.aoa_to_sheet(payRows);
-    wsPay["!cols"] = [22, 14, 16, 16, 14, 16].map((w) => ({ wch: w }));
+    wsPay["!cols"] = [24, 20, 16, 16, 18, 16].map((w) => ({ wch: w }));
     XLSX.utils.book_append_sheet(wb, wsPay, `${loc} Payments`);
   });
 
-  // Return as base64 string for email attachment
+  // ── Per location: Progress Notes sheet ───────────────────────────────────
+  locations.forEach((loc) => {
+    const locStudents    = students.filter((s) => s.location === loc);
+    const scheduledDates = getScheduledDates(loc, month);
+
+    if (locStudents.length === 0 || scheduledDates.length === 0) return;
+
+    // Build week headers from scheduled dates
+    const weekHeaders = scheduledDates.map((d, i) => {
+      const day = new Date(d + "T00:00:00");
+      return `Week ${i + 1} (${day.getDate()} ${day.toLocaleDateString("en-LK", { weekday: "short" })})`;
+    });
+
+    const progRows = [
+      [`${loc} — Progress Notes — ${monthLabel(month)}`],
+      [],
+      ["Student Name", "Phone", ...weekHeaders],
+    ];
+
+    locStudents.forEach((s) => {
+      const weekNotes = scheduledDates.map((_, i) => {
+        const key = `${month}_W${i + 1}`;
+        const rec = progressNotes.find((n) => n.studentId === s.id && n.yearMonth === month && n.weekNum === i + 1);
+        return rec?.note || "";
+      });
+      progRows.push([s.name, s.phone || "—", ...weekNotes]);
+    });
+
+    const wsProg = XLSX.utils.aoa_to_sheet(progRows);
+    wsProg["!cols"] = [22, 14, ...weekHeaders.map(() => 35)].map((w) => ({ wch: w }));
+    XLSX.utils.book_append_sheet(wb, wsProg, `${loc} Progress`);
+  });
+
   return XLSX.write(wb, { bookType: "xlsx", type: "base64" });
 }
 
-// Also export a plain-text summary for the email body
 export function generateEmailSummary(month, students, attendanceData, payments, locations) {
   const today = new Date().toISOString().split("T")[0];
-  let body = `📊 MONTHLY REPORT — ${monthLabel(month)}\n`;
+  let body = `MONTHLY REPORT — ${monthLabel(month)}\n`;
   body += `Generated on ${new Date().toLocaleDateString("en-LK", { day: "numeric", month: "long", year: "numeric" })}\n\n`;
 
   let grandTotal = 0;
@@ -162,23 +198,26 @@ export function generateEmailSummary(month, students, attendanceData, payments, 
     const scheduledDates = getScheduledDates(loc, month);
     const passedDates    = scheduledDates.filter((d) => d <= today);
     const locPayments    = payments.filter((p) => p.month === month && p.location === loc);
-    const totalCollected = locPayments.reduce((s, p) => s + Number(p.amount), 0);
+    const totalCollected = locPayments.filter((p) => p.paymentType !== "scholarship").reduce((s, p) => s + Number(p.amount), 0);
+    const scholarCount   = locPayments.filter((p) => p.paymentType === "scholarship").length;
     const paidIds        = new Set(locPayments.map((p) => p.studentId));
     const pendingNames   = locStudents.filter((s) => !paidIds.has(s.id)).map((s) => s.name);
 
     grandTotal += totalCollected;
 
-    body += `📍 ${loc}\n`;
+    body += `${loc}\n`;
     body += `   Students: ${locStudents.length} | Classes held: ${passedDates.length}\n`;
-    body += `   Collected: Rs. ${totalCollected.toLocaleString()}\n`;
+    body += `   Collected: Rs. ${totalCollected.toLocaleString()}`;
+    if (scholarCount > 0) body += ` | Scholarships: ${scholarCount}`;
+    body += `\n`;
     body += pendingNames.length > 0
       ? `   Pending: ${pendingNames.join(", ")}\n`
-      : `   Pending: None — everyone paid! 🎉\n`;
+      : `   Pending: None — everyone paid!\n`;
     body += "\n";
   });
 
-  body += `💰 GRAND TOTAL COLLECTED: Rs. ${grandTotal.toLocaleString()}\n`;
-  body += `\nFull details are in the attached Excel file.\n`;
+  body += `GRAND TOTAL COLLECTED: Rs. ${grandTotal.toLocaleString()}\n`;
+  body += `\nFull details (attendance, payments, progress notes) are in the attached Excel file.\n`;
   body += `\n— Sent from Aunty Adele's Vocal Class Manager`;
 
   return body;
