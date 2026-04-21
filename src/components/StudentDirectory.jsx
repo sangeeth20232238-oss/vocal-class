@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { UserPlus, Users, Search, Trash2, Eye } from "lucide-react";
 import toast from "react-hot-toast";
-import { doc, deleteDoc } from "firebase/firestore";
-import { db } from "../firebase";
-import { addStudent, parseFirebaseError } from "../firestoreService";
+import { addStudent, deleteStudentCascade, parseFirebaseError } from "../firestoreService";
 import StudentProfile from "./StudentProfile";
 
 export default function StudentDirectory({ students, onStudentAdded, locations, activeLocation }) {
@@ -60,7 +58,7 @@ export default function StudentDirectory({ students, onStudentAdded, locations, 
               Full Name <span className="text-red-500">*</span>
             </label>
             <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Nimal Perera"
+              placeholder="e.g. john doe"
               className="w-full border-2 border-blue-300 rounded-xl px-3 py-2.5 text-sm sm:text-base focus:outline-none focus:border-blue-600" />
           </div>
           <div>
@@ -146,10 +144,18 @@ function StudentRow({ student, showLocation, onDelete, onView }) {
   const [deleting, setDeleting]     = useState(false);
 
   const handleDelete = async () => {
+    const isSure = window.confirm(
+      `WARNING: You are about to permanently delete ${student.name} AND all of their attendance, payments, and progress records.\n\nAre you absolutely sure you want to proceed? This cannot be undone.`
+    );
+    if (!isSure) {
+      setConfirming(false);
+      return;
+    }
+
     setDeleting(true);
     try {
-      await deleteDoc(doc(db, "students", student.id));
-      toast.success(`${student.name} has been removed.`);
+      await deleteStudentCascade(student.id);
+      toast.success(`${student.name} and all related records have been removed.`);
       onDelete();
     } catch (err) {
       toast.error(parseFirebaseError(err, "Could not delete. Please try again."));

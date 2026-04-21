@@ -1,6 +1,6 @@
 // src/firestoreService.js
 import {
-  collection, addDoc, getDocs, doc, setDoc, deleteDoc, query, where, serverTimestamp,
+  collection, addDoc, getDocs, doc, setDoc, deleteDoc, query, where, serverTimestamp, writeBatch
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -19,7 +19,28 @@ export const getStudents = async () => {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };
 
-export const deleteStudent = (id) => deleteDoc(doc(db, "students", id));
+export const deleteStudentCascade = async (studentId) => {
+  const batch = writeBatch(db);
+
+  // 1. Reference the student document
+  const studentRef = doc(db, "students", studentId);
+  batch.delete(studentRef);
+
+  // 2. Find and delete docs in other collections
+  const collectionsToClear = ["attendance", "payments", "progress"];
+  
+  for (const collectionName of collectionsToClear) {
+    const q = query(collection(db, collectionName), where("studentId", "==", studentId));
+    const querySnapshot = await getDocs(q);
+    
+    querySnapshot.forEach((document) => {
+      batch.delete(document.ref);
+    });
+  }
+
+  // 3. Commit the batch to the cloud
+  await batch.commit();
+};
 
 export const updateStudent = (id, data) =>
   setDoc(doc(db, "students", id), data, { merge: true });
