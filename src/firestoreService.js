@@ -4,6 +4,12 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase";
 
+export const parseFirebaseError = (err, fallback) => {
+  if (err?.code === "permission-denied") return "System maintenance required (Permissions)";
+  if (err?.code === "unavailable" || err?.message?.toLowerCase().includes("network")) return "Internet connection error. Please check your network.";
+  return fallback || "An unexpected error occurred.";
+};
+
 // ── Students ──────────────────────────────────────────────────────────────────
 export const addStudent = (name, phone, location) =>
   addDoc(collection(db, "students"), { name, phone, location, createdAt: serverTimestamp() });

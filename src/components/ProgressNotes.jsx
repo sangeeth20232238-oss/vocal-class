@@ -6,7 +6,7 @@
 import { useState, useEffect } from "react";
 import { BookOpen, Save, ChevronDown, ChevronUp, Pencil } from "lucide-react";
 import toast from "react-hot-toast";
-import { saveProgressNote, getProgressForStudent } from "../firestoreService";
+import { saveProgressNote, getProgressForStudent, parseFirebaseError } from "../firestoreService";
 import { getScheduledDates } from "../scheduleConfig";
 
 const monthLabel = (m) =>
@@ -61,8 +61,8 @@ export default function ProgressNotes({ student, currentMonth }) {
       await saveProgressNote(student.id, student.name, student.location, currentMonth, slot.weekNum, text);
       setNotes((prev) => ({ ...prev, [slot.key]: { note: text, updatedAt: { seconds: Date.now() / 1000 } } }));
       toast.success(`Progress saved for ${student.name} — ${slot.label}`);
-    } catch {
-      toast.error("Could not save. Please try again.");
+    } catch (err) {
+      toast.error(parseFirebaseError(err, "Could not save. Please try again."));
     } finally {
       setSaving((prev) => ({ ...prev, [slot.key]: false }));
     }

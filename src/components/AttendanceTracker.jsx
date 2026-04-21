@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { CalendarCheck, CheckCheck, ChevronLeft, CheckCircle2 } from "lucide-react";
 import toast from "react-hot-toast";
-import { setAttendance, getAttendanceForDate } from "../firestoreService";
+import { setAttendance, getAttendanceForDate, parseFirebaseError } from "../firestoreService";
 import { LOCATION_SCHEDULE, getScheduledDates } from "../scheduleConfig";
 
 const todayStr     = () => new Date().toISOString().split("T")[0];
@@ -128,7 +128,7 @@ function MarkingStep({ date, activeLocation, students, onBack }) {
   const loadAttendance = useCallback(async () => {
     setLoading(true);
     try { setRecord(await getAttendanceForDate(date)); }
-    catch { toast.error("Could not load. Check your connection."); }
+    catch (err) { toast.error(parseFirebaseError(err, "Could not load. Check your connection.")); }
     finally { setLoading(false); }
   }, [date]);
 
@@ -138,9 +138,9 @@ function MarkingStep({ date, activeLocation, students, onBack }) {
     setRecord((prev) => ({ ...prev, [student.id]: status }));
     try {
       await setAttendance(student.id, date, status, student.location);
-    } catch {
+    } catch (err) {
       setRecord((prev) => ({ ...prev, [student.id]: undefined }));
-      toast.error(`Could not save ${student.name}. Try again.`);
+      toast.error(parseFirebaseError(err, `Could not save ${student.name}. Try again.`));
     }
   };
 
@@ -153,8 +153,8 @@ function MarkingStep({ date, activeLocation, students, onBack }) {
     try {
       await Promise.all(unmarked.map((s) => setAttendance(s.id, date, "present", s.location)));
       toast.success(`${unmarked.length} student${unmarked.length > 1 ? "s" : ""} marked Present!`);
-    } catch {
-      toast.error("Could not mark all. Please try again.");
+    } catch (err) {
+      toast.error(parseFirebaseError(err, "Could not mark all. Please try again."));
       loadAttendance();
     } finally { setMarking(false); }
   };

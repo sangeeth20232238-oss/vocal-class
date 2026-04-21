@@ -26,8 +26,10 @@ export default function App() {
   const loadStudents = useCallback(async () => {
     try {
       const data = await getStudents();
-      setStudents(data.sort((a, b) => a.name.localeCompare(b.name)));
-    } catch { /* handled in service */ }
+      setStudents(data.sort((a, b) => (a.name || "").localeCompare(b.name || "")));
+    } catch (err) {
+      console.error("Failed to fetch students:", err);
+    }
   }, []);
 
   useEffect(() => { if (activeLocation) loadStudents(); }, [activeLocation, loadStudents]);

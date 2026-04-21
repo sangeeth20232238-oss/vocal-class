@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Wallet, Search, CheckCircle, Clock, ChevronDown, ChevronUp, GraduationCap } from "lucide-react";
 import toast from "react-hot-toast";
-import { recordPayment, getPayments } from "../firestoreService";
+import { recordPayment, getPayments, parseFirebaseError } from "../firestoreService";
 
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 const MONTHLY_FEE  = 4500;
@@ -83,8 +83,8 @@ function QuickPayRow({ student, month, onPaid }) {
         ? `🎓 Scholarship recorded for ${student.name}!`
         : `Rs. ${net.toLocaleString()} recorded for ${student.name}!`);
       onPaid();
-    } catch {
-      toast.error("Could not save. Please try again.");
+    } catch (err) {
+      toast.error(parseFirebaseError(err, "Could not save. Please try again."));
     } finally { setSaving(false); }
   };
 
@@ -191,7 +191,7 @@ export default function FeeLedger({ students, activeLocation }) {
 
   const loadPayments = useCallback(async () => {
     try { setPayments(await getPayments()); }
-    catch { toast.error("Could not load payments. Check your connection."); }
+    catch (err) { toast.error(parseFirebaseError(err, "Could not load payments. Check your connection.")); }
   }, []);
 
   useEffect(() => { loadPayments(); }, [loadPayments]);
@@ -217,8 +217,8 @@ export default function FeeLedger({ students, activeLocation }) {
       setAmount(String(payTypeConfig(payType).default));
       setDeduction("0"); setStudentId(""); setSearchText("");
       loadPayments();
-    } catch {
-      toast.error("Could not save payment. Please try again.");
+    } catch (err) {
+      toast.error(parseFirebaseError(err, "Could not save payment. Please try again."));
     } finally { setSaving(false); }
   };
 

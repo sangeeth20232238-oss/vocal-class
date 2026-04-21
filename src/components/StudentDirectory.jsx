@@ -1,8 +1,9 @@
-// src/components/StudentDirectory.jsx
 import { useState } from "react";
 import { UserPlus, Users, Search, Trash2, Eye } from "lucide-react";
 import toast from "react-hot-toast";
-import { addStudent, deleteStudent } from "../firestoreService";
+import { doc, deleteDoc } from "firebase/firestore";
+import { db } from "../firebase";
+import { addStudent, parseFirebaseError } from "../firestoreService";
 import StudentProfile from "./StudentProfile";
 
 export default function StudentDirectory({ students, onStudentAdded, locations, activeLocation }) {
@@ -26,8 +27,9 @@ export default function StudentDirectory({ students, onStudentAdded, locations, 
       toast.success(`${name.trim()} added to ${location}!`);
       setName(""); setPhone("");
       onStudentAdded();
-    } catch {
-      toast.error("Could not save. Please check your internet connection.");
+    } catch (err) {
+      console.error("Firebase Error saving student:", err);
+      toast.error(parseFirebaseError(err, "Could not save. Please try again."));
     } finally { setSaving(false); }
   };
 
@@ -146,11 +148,11 @@ function StudentRow({ student, showLocation, onDelete, onView }) {
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      await deleteStudent(student.id);
+      await deleteDoc(doc(db, "students", student.id));
       toast.success(`${student.name} has been removed.`);
       onDelete();
-    } catch {
-      toast.error("Could not delete. Please try again.");
+    } catch (err) {
+      toast.error(parseFirebaseError(err, "Could not delete. Please try again."));
     } finally { setDeleting(false); setConfirming(false); }
   };
 

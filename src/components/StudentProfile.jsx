@@ -1,7 +1,7 @@
 // src/components/StudentProfile.jsx
 import { useState, useEffect } from "react";
 import { X, Phone, MapPin, Calendar, CreditCard, TrendingUp, GraduationCap } from "lucide-react";
-import { getAttendanceForStudent, getPayments, updateStudent } from "../firestoreService";
+import { getAttendanceForStudent, getPayments, updateStudent, parseFirebaseError } from "../firestoreService";
 import { LOCATION_SCHEDULE } from "../scheduleConfig";
 import ProgressNotes from "./ProgressNotes";
 import toast from "react-hot-toast";
@@ -75,7 +75,7 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
       toast.success("Profile updated!");
       setEditing(false);
       onUpdated();
-    } catch { toast.error("Could not update. Please try again."); }
+    } catch (err) { toast.error(parseFirebaseError(err, "Could not update. Please try again.")); }
     finally { setSaving(false); }
   };
 

@@ -4,7 +4,7 @@ import { Send, FileSpreadsheet, X, CheckCircle } from "lucide-react";
 import emailjs from "@emailjs/browser";
 import toast from "react-hot-toast";
 import { generateMonthlyReport, generateEmailSummary } from "../reportGenerator";
-import { getAttendanceForMonth, getPayments, getProgressForMonth } from "../firestoreService";
+import { getAttendanceForMonth, getPayments, getProgressForMonth, parseFirebaseError } from "../firestoreService";
 
 const EMAILJS_SERVICE_ID  = "service_ettqbku";
 const EMAILJS_TEMPLATE_ID = "template_hi73tl8";
@@ -41,8 +41,8 @@ export default function MonthlyReportButton({ month, students, locations }) {
       const summary = generateEmailSummary(month, students, att, pay, locations);
       setPreview({ att, pay, prog, summary });
       setOpen(true);
-    } catch {
-      toast.error("Could not load data. Check your connection.");
+    } catch (err) {
+      toast.error(parseFirebaseError(err, "Could not load data. Check your connection."));
     } finally { setLoading(false); }
   };
 
@@ -63,7 +63,7 @@ export default function MonthlyReportButton({ month, students, locations }) {
       setOpen(false); setPreview(null);
     } catch (err) {
       console.error(err);
-      toast.error("Email failed. Excel was still downloaded.");
+      toast.error(parseFirebaseError(err, "Email failed. Excel was still downloaded."));
     } finally { setLoading(false); }
   };
 
@@ -78,8 +78,8 @@ export default function MonthlyReportButton({ month, students, locations }) {
       const excelBase64 = generateMonthlyReport(month, students, att, pay, locations, prog);
       downloadExcel(excelBase64, month);
       toast.success("Excel report downloaded!");
-    } catch {
-      toast.error("Could not generate report.");
+    } catch (err) {
+      toast.error(parseFirebaseError(err, "Could not generate report."));
     } finally { setLoading(false); }
   };
 
