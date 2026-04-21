@@ -6,7 +6,7 @@
 //  3. Copy each value from the firebaseConfig object shown there and paste below.
 // ─────────────────────────────────────────────────────────────────────────────
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey:            "AIzaSyBqNP3Zpt370cbxDdBhFNSm4vRNwh44aIw",
@@ -18,4 +18,6 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
