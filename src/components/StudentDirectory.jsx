@@ -1,23 +1,23 @@
+// src/components/StudentDirectory.jsx
 import { useState } from "react";
-import { UserPlus, Users, Search, Trash2, Eye } from "lucide-react";
+import { UserPlus, Users, Search, Trash2, Eye, Phone, MapPin } from "lucide-react";
 import toast from "react-hot-toast";
 import { addStudent, deleteStudentCascade, parseFirebaseError } from "../firestoreService";
 import StudentProfile from "./StudentProfile";
 
 export default function StudentDirectory({ students, onStudentAdded, locations, activeLocation }) {
-  const [name, setName]             = useState("");
-  const [phone, setPhone]           = useState("");
-  const [location, setLocation]     = useState(locations[0] || "");
-  const [saving, setSaving]         = useState(false);
-  const [search, setSearch]         = useState("");
+  const [name, setName]         = useState("");
+  const [phone, setPhone]       = useState("");
+  const [location, setLocation] = useState(locations[0] || "");
+  const [saving, setSaving]     = useState(false);
+  const [search, setSearch]     = useState("");
   const [profileStudent, setProfileStudent] = useState(null);
 
   const handleAdd = async () => {
-    if (!name.trim()) { toast.error("Please enter the student's name before saving."); return; }
-    if (!location)    { toast.error("Please select a location for this student."); return; }
+    if (!name.trim()) { toast.error("Please enter the student's name."); return; }
+    if (!location)    { toast.error("Please select a location."); return; }
     if (phone && !/^\+?[\d\s\-()]{7,15}$/.test(phone.trim())) {
-      toast.error("That phone number doesn't look right. Please check it.");
-      return;
+      toast.error("That phone number doesn't look right."); return;
     }
     setSaving(true);
     try {
@@ -26,7 +26,6 @@ export default function StudentDirectory({ students, onStudentAdded, locations, 
       setName(""); setPhone("");
       onStudentAdded();
     } catch (err) {
-      console.error("Firebase Error saving student:", err);
       toast.error(parseFirebaseError(err, "Could not save. Please try again."));
     } finally { setSaving(false); }
   };
@@ -45,66 +44,80 @@ export default function StudentDirectory({ students, onStudentAdded, locations, 
     : null;
 
   return (
-    <section className="space-y-4 sm:space-y-6">
+    <section className="space-y-5">
 
       {/* Add Student Form */}
-      <div className="bg-white/80 backdrop-blur rounded-2xl shadow-md p-4 sm:p-6 border border-blue-100">
-        <h2 className="text-lg sm:text-2xl font-bold text-blue-800 mb-4 flex items-center gap-2">
-          <UserPlus size={22} /> Add New Student
-        </h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
+        <div className="section-header">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: "linear-gradient(135deg,#1d4ed8,#6d28d9)" }}>
+            <UserPlus size={17} className="text-white" />
+          </div>
+          Add New Student
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           <div>
-            <label className="block text-sm sm:text-base font-semibold text-blue-900 mb-1">
+            <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">
               Full Name <span className="text-red-500">*</span>
             </label>
             <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. john doe"
-              className="w-full border-2 border-blue-300 rounded-xl px-3 py-2.5 text-sm sm:text-base focus:outline-none focus:border-blue-600" />
+              placeholder="e.g. John Doe"
+              className="input-field" />
           </div>
           <div>
-            <label className="block text-sm sm:text-base font-semibold text-blue-900 mb-1">Phone Number</label>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">Phone Number</label>
             <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
               placeholder="e.g. 0771234567"
-              className="w-full border-2 border-blue-300 rounded-xl px-3 py-2.5 text-sm sm:text-base focus:outline-none focus:border-blue-600" />
+              className="input-field" />
           </div>
           <div>
-            <label className="block text-sm sm:text-base font-semibold text-blue-900 mb-1">
+            <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">
               Location <span className="text-red-500">*</span>
             </label>
             <select value={location} onChange={(e) => setLocation(e.target.value)}
-              className="w-full border-2 border-blue-300 rounded-xl px-3 py-2.5 text-sm sm:text-base focus:outline-none focus:border-blue-600 bg-white">
+              className="input-field">
               {locations.filter((l) => l !== "All").map((l) => (
                 <option key={l} value={l}>{l}</option>
               ))}
             </select>
           </div>
         </div>
+
         <button onClick={handleAdd} disabled={saving}
-          className="mt-4 w-full sm:w-auto bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white text-sm sm:text-base font-bold px-6 py-3 rounded-xl transition-colors">
-          {saving ? "Saving…" : "Save Student"}
+          className="btn-primary mt-4 text-sm">
+          {saving ? (
+            <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving…</>
+          ) : (
+            <><UserPlus size={15} />Save Student</>
+          )}
         </button>
       </div>
 
       {/* Student List */}
-      <div className="bg-white/80 backdrop-blur rounded-2xl shadow-md p-4 sm:p-6 border border-blue-100">
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-          <h2 className="text-lg sm:text-2xl font-bold text-blue-800 flex items-center gap-2">
-            <Users size={22} />
+          <div className="section-header mb-0">
+            <Users size={18} className="text-blue-600" />
             {activeLocation === "All" ? "All Students" : activeLocation}
-            <span className="text-sm font-semibold text-blue-400">({filtered.length})</span>
-          </h2>
-          <div className="relative w-full sm:w-auto">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400 pointer-events-none" />
+            <span className="badge bg-blue-100 text-blue-700 ml-1">{filtered.length}</span>
+          </div>
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name or phone…"
-              className="w-full sm:w-52 border-2 border-blue-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:border-blue-500" />
+              placeholder="Search name or phone…"
+              className="input-field !pl-9 !py-2 text-sm w-full sm:w-52" />
           </div>
         </div>
 
         {filtered.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="text-4xl mb-2">{search ? "🔍" : "🎤"}</div>
-            <p className="text-blue-400 text-sm">
+          <div className="text-center py-10">
+            <div className="w-16 h-16 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center mx-auto mb-3">
+              {search
+                ? <Search size={28} className="text-blue-300" />
+                : <Users size={28} className="text-blue-300" />}
+            </div>
+            <p className="text-slate-400 text-sm font-medium">
               {search ? `No students match "${search}"` : "No students here yet. Add one above!"}
             </p>
           </div>
@@ -112,17 +125,17 @@ export default function StudentDirectory({ students, onStudentAdded, locations, 
           Object.entries(grouped).map(([loc, group]) => (
             <div key={loc} className="mb-5">
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-sm font-bold text-blue-700 bg-blue-100 px-3 py-1 rounded-full">
-                  {loc} &middot; {group.length}
+                <span className="badge bg-blue-100 text-blue-700">
+                  <MapPin size={10} /> {loc} · {group.length}
                 </span>
               </div>
-              <ul className="divide-y divide-blue-100">
+              <ul className="divide-y divide-slate-100">
                 {group.map((s) => <StudentRow key={s.id} student={s} showLocation={false} onDelete={onStudentAdded} onView={setProfileStudent} />)}
               </ul>
             </div>
           ))
         ) : (
-          <ul className="divide-y divide-blue-100">
+          <ul className="divide-y divide-slate-100">
             {filtered.map((s) => <StudentRow key={s.id} student={s} showLocation={false} onDelete={onStudentAdded} onView={setProfileStudent} />)}
           </ul>
         )}
@@ -145,17 +158,13 @@ function StudentRow({ student, showLocation, onDelete, onView }) {
 
   const handleDelete = async () => {
     const isSure = window.confirm(
-      `WARNING: You are about to permanently delete ${student.name} AND all of their attendance, payments, and progress records.\n\nAre you absolutely sure you want to proceed? This cannot be undone.`
+      `WARNING: You are about to permanently delete ${student.name} AND all of their attendance, payments, and progress records.\n\nAre you absolutely sure? This cannot be undone.`
     );
-    if (!isSure) {
-      setConfirming(false);
-      return;
-    }
-
+    if (!isSure) { setConfirming(false); return; }
     setDeleting(true);
     try {
       await deleteStudentCascade(student.id);
-      toast.success(`${student.name} and all related records have been removed.`);
+      toast.success(`${student.name} and all related records removed.`);
       onDelete();
     } catch (err) {
       toast.error(parseFirebaseError(err, "Could not delete. Please try again."));
@@ -163,33 +172,46 @@ function StudentRow({ student, showLocation, onDelete, onView }) {
   };
 
   return (
-    <li className="py-3 flex justify-between items-center gap-2 hover:bg-blue-50/50 rounded-xl px-2 transition-colors">
-      <div className="min-w-0">
-        <span className="text-sm sm:text-base font-semibold text-blue-900 block truncate">{student.name}</span>
-        {showLocation && (
-          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{student.location}</span>
-        )}
-        {student.phone && <span className="text-xs text-blue-400 block">{student.phone}</span>}
+    <li className="py-3 flex justify-between items-center gap-2 hover:bg-slate-50 rounded-xl px-2 transition-colors">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-extrabold text-white shrink-0"
+          style={{ background: "linear-gradient(135deg,#1d4ed8,#6d28d9)" }}>
+          {student.name.charAt(0).toUpperCase()}
+        </div>
+        <div className="min-w-0">
+          <span className="text-sm font-semibold text-slate-800 block truncate">{student.name}</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {showLocation && (
+              <span className="badge bg-blue-100 text-blue-700"><MapPin size={9} />{student.location}</span>
+            )}
+            {student.phone && (
+              <span className="text-xs text-slate-400 flex items-center gap-1">
+                <Phone size={10} />{student.phone}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
+
       <div className="flex items-center gap-1.5 shrink-0">
         <button onClick={() => onView(student)}
-          className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-colors border border-blue-200">
+          className="btn-ghost text-xs py-1.5 px-2.5">
           <Eye size={13} /> Profile
         </button>
         {!confirming ? (
           <button onClick={() => setConfirming(true)}
-            className="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-xl transition-colors">
-            <Trash2 size={16} />
+            className="p-1.5 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+            <Trash2 size={15} />
           </button>
         ) : (
           <div className="flex items-center gap-1 bg-red-50 border border-red-200 rounded-xl px-2 py-1">
             <span className="text-xs font-semibold text-red-700 hidden sm:block">Remove?</span>
             <button onClick={handleDelete} disabled={deleting}
-              className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-2 py-1 rounded-lg disabled:opacity-60">
+              className="btn-danger text-xs py-1 px-2">
               {deleting ? "…" : "Yes"}
             </button>
             <button onClick={() => setConfirming(false)}
-              className="text-slate-500 hover:text-slate-700 text-xs font-semibold px-1 py-1">
+              className="text-slate-500 hover:text-slate-700 text-xs font-semibold px-1">
               No
             </button>
           </div>
