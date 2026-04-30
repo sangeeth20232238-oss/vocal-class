@@ -34,7 +34,7 @@ export default function SplashScreen({ onSelect }) {
   const [entering, setEntering] = useState(false);
 
   const handleEnter = () => {
-    if (!selected) return;
+    if (!selected || entering) return;
     setEntering(true);
     setTimeout(() => onSelect(selected), 700);
   };

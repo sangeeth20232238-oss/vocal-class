@@ -1,24 +1,40 @@
 // src/components/StudentProfile.jsx
 import { useState, useEffect } from "react";
-import { X, Phone, MapPin, Calendar, CreditCard, TrendingUp, GraduationCap, Pencil } from "lucide-react";
+import { X, Phone, MapPin, Calendar, CreditCard, TrendingUp, GraduationCap, Pencil, User, Users } from "lucide-react";
 import { getAttendanceForStudent, getPayments, updateStudent, parseFirebaseError } from "../firestoreService";
-import { LOCATION_SCHEDULE } from "../scheduleConfig";
+import { LOCATION_SCHEDULE, LOCATION_CLASS_GROUPS } from "../scheduleConfig";
 import ProgressNotes from "./ProgressNotes";
 import toast from "react-hot-toast";
+
+const GENDERS = ["Female", "Male"];
 
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 const fmtDate   = (ts) => !ts?.seconds ? "—" : new Date(ts.seconds * 1000).toLocaleDateString("en-LK", { day: "numeric", month: "short", year: "numeric" });
 const fmtJoined = (ts) => !ts?.seconds ? "—" : new Date(ts.seconds * 1000).toLocaleDateString("en-LK", { month: "long", year: "numeric" });
+const fmtDob    = (dob) => {
+  if (!dob) return null;
+  return new Date(dob + "T00:00:00").toLocaleDateString("en-LK", { day: "numeric", month: "long", year: "numeric" });
+};
+const calcAge = (dob) => {
+  if (!dob) return null;
+  const birth = new Date(dob);
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+};
 
 const PAY_TYPE_LABELS = {
-  monthly:     { label: "Monthly",     color: "bg-green-100 text-green-700",   badge: "📅" },
-  term:        { label: "Term Fee",    color: "bg-indigo-100 text-indigo-700", badge: "🗓️" },
-  annual:      { label: "Term Fee",    color: "bg-indigo-100 text-indigo-700", badge: "🗓️" },
-  scholarship: { label: "Scholarship", color: "bg-purple-100 text-purple-700", badge: "🎓" },
+  monthly:      { label: "Monthly",          color: "bg-green-100 text-green-700",   badge: "📅" },
+  term:         { label: "Term Fee",         color: "bg-indigo-100 text-indigo-700", badge: "🗓️" },
+  annual:       { label: "Term Fee",         color: "bg-indigo-100 text-indigo-700", badge: "🗓️" },
+  scholarship:  { label: "Scholarship",      color: "bg-purple-100 text-purple-700", badge: "🎓" },
+  registration: { label: "Registration Fee", color: "bg-blue-100 text-blue-700",     badge: "📋" },
 };
 
 function PayTypeBadge({ type }) {
-  const cfg = PAY_TYPE_LABELS[type] || PAY_TYPE_LABELS.monthly;
+  const cfg = PAY_TYPE_LABELS[type] || { label: type, color: "bg-slate-100 text-slate-600", badge: "💳" };
   return <span className={`badge ${cfg.color}`}>{cfg.badge} {cfg.label}</span>;
 }
 
@@ -35,6 +51,9 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
   const [editing, setEditing]       = useState(false);
   const [editName, setEditName]     = useState(student.name);
   const [editPhone, setEditPhone]   = useState(student.phone || "");
+  const [editDob, setEditDob]       = useState(student.dob || "");
+  const [editGender, setEditGender]         = useState(student.gender || "Female");
+  const [editClassGroup, setEditClassGroup] = useState(student.classGroup || "");
   const [saving, setSaving]         = useState(false);
   const [activeTab, setActiveTab]   = useState("overview");
   const [noteMonth, setNoteMonth]   = useState(currentMonth());
@@ -52,7 +71,13 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
     if (!editName.trim()) { toast.error("Name cannot be empty."); return; }
     setSaving(true);
     try {
-      await updateStudent(student.id, { name: editName.trim(), phone: editPhone.trim() });
+      await updateStudent(student.id, {
+        name:       editName.trim(),
+        phone:      editPhone.trim(),
+        dob:        editDob,
+        gender:     editGender,
+        classGroup: editClassGroup,
+      });
       toast.success("Profile updated!");
       setEditing(false);
       onUpdated();
@@ -60,13 +85,26 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
     finally { setSaving(false); }
   };
 
-  const presentCount = attendance.filter((r) => r.status === "present").length;
-  const absentCount  = attendance.filter((r) => r.status === "absent").length;
-  const totalMarked  = presentCount + absentCount;
-  const attendRate   = totalMarked > 0 ? Math.round((presentCount / totalMarked) * 100) : 0;
-  const schedule     = LOCATION_SCHEDULE[student.location];
-  const totalPaid    = payments.reduce((s, p) => s + Number(p.amount), 0);
+  const cancelEdit = () => {
+    setEditing(false);
+    setEditName(student.name);
+    setEditPhone(student.phone || "");
+    setEditDob(student.dob || "");
+    setEditGender(student.gender || "Female");
+    setEditClassGroup(student.classGroup || "");
+  };
+
+  const profileClassGroups = LOCATION_CLASS_GROUPS[student.location] || [];
+  const classGroupLabel = profileClassGroups.find((g) => g.id === student.classGroup)?.label || null;
+
+  const presentCount  = attendance.filter((r) => r.status === "present").length;
+  const absentCount   = attendance.filter((r) => r.status === "absent").length;
+  const totalMarked   = presentCount + absentCount;
+  const attendRate    = totalMarked > 0 ? Math.round((presentCount / totalMarked) * 100) : 0;
+  const schedule      = LOCATION_SCHEDULE[student.location];
+  const totalPaid     = payments.reduce((s, p) => s + Number(p.amount), 0);
   const isScholarship = payments.some((p) => p.paymentType === "scholarship");
+  const age           = calcAge(student.dob);
 
   const rateColor = attendRate >= 75 ? "#22c55e" : attendRate >= 50 ? "#f59e0b" : "#ef4444";
   const rateText  = attendRate >= 75 ? "text-green-600" : attendRate >= 50 ? "text-amber-500" : "text-red-500";
@@ -79,14 +117,16 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
   return (
     <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" />
-      <div className="relative bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-2xl max-h-[94vh] flex flex-col animate-scale-in"
+      <div className="relative bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-2xl max-h-[94vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}>
 
-        {/* Header */}
+        {/* ── Header ── */}
         <div className="sm:rounded-t-2xl rounded-t-2xl px-4 sm:px-6 py-4 text-white shrink-0"
           style={{ background: "linear-gradient(135deg,#1d4ed8,#6d28d9)" }}>
+
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
+              {/* Avatar */}
               <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center text-xl font-extrabold shadow-lg shrink-0">
                 {student.name.charAt(0).toUpperCase()}
               </div>
@@ -112,22 +152,82 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
                 </div>
               </div>
             </div>
-            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors shrink-0">
+            <button onClick={onClose} className="w-11 h-11 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors shrink-0">
               <X size={17} />
             </button>
           </div>
 
-          <div className="mt-2 flex items-center gap-2">
-            <Phone size={12} className="text-blue-300 shrink-0" />
-            {editing ? (
-              <input value={editPhone} onChange={(e) => setEditPhone(e.target.value)}
-                placeholder="Phone number"
-                className="bg-white/20 rounded-xl px-3 py-1 text-white text-sm focus:outline-none" />
-            ) : (
-              <span className="text-blue-200 text-sm">{student.phone || "No phone number"}</span>
-            )}
-          </div>
+          {/* ── Editable fields ── */}
+          {editing ? (
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {/* Phone */}
+              <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
+                <Phone size={12} className="text-blue-300 shrink-0" />
+                <input value={editPhone} onChange={(e) => setEditPhone(e.target.value)}
+                  placeholder="Phone number"
+                  className="bg-transparent text-white text-sm focus:outline-none w-full placeholder-white/40" />
+              </div>
+              {/* DOB */}
+              <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
+                <Calendar size={12} className="text-blue-300 shrink-0" />
+                <input type="date" value={editDob} onChange={(e) => setEditDob(e.target.value)}
+                  max={new Date().toISOString().split("T")[0]}
+                  className="bg-transparent text-white text-sm focus:outline-none w-full" />
+              </div>
+              {/* Gender */}
+              <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
+                <User size={12} className="text-blue-300 shrink-0" />
+                <select value={editGender} onChange={(e) => setEditGender(e.target.value)}
+                  className="bg-transparent text-white text-sm focus:outline-none w-full">
+                  {GENDERS.map((g) => <option key={g} value={g} className="text-slate-800">{g}</option>)}
+                </select>
+              </div>
+              {/* Class Group */}
+              <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2 sm:col-span-2">
+                <Users size={12} className="text-blue-300 shrink-0" />
+                <select value={editClassGroup} onChange={(e) => setEditClassGroup(e.target.value)}
+                  className="bg-transparent text-white text-sm focus:outline-none w-full">
+                  <option value="" className="text-slate-800">— Select class group —</option>
+                  {profileClassGroups.map((g) => (
+                    <option key={g.id} value={g.id} className="text-slate-800">{g.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          ) : (
+            /* Read-only info pills */
+            <div className="mt-2 flex flex-wrap gap-2">
+              <span className="flex items-center gap-1 text-blue-200 text-xs">
+                <Phone size={11} className="text-blue-300" />
+                {student.phone || "No phone"}
+              </span>
+              {student.dob && (
+                <span className="flex items-center gap-1 text-blue-200 text-xs">
+                  <Calendar size={11} className="text-blue-300" />
+                  {fmtDob(student.dob)}{age !== null ? ` (${age} yrs)` : ""}
+                </span>
+              )}
+              {student.gender && student.gender !== "Not specified" && (
+                <span className="flex items-center gap-1 text-blue-200 text-xs">
+                  <User size={11} className="text-blue-300" />
+                  {student.gender}
+                </span>
+              )}
+              {classGroupLabel && (
+                <span className="flex items-center gap-1 text-violet-300 text-xs font-semibold">
+                  <Users size={11} className="text-violet-300" />
+                  {classGroupLabel}
+                </span>
+              )}
+              {!classGroupLabel && (
+                <span className="flex items-center gap-1 text-amber-300 text-xs font-semibold">
+                  <Users size={11} /> No class group — tap Edit Profile
+                </span>
+              )}
+            </div>
+          )}
 
+          {/* Edit controls */}
           <div className="mt-2 flex gap-2">
             {editing ? (
               <>
@@ -135,7 +235,7 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
                   className="bg-white text-blue-700 font-bold px-3 py-1.5 rounded-xl text-xs hover:bg-blue-50 disabled:opacity-60">
                   {saving ? "Saving…" : "Save Changes"}
                 </button>
-                <button onClick={() => { setEditing(false); setEditName(student.name); setEditPhone(student.phone || ""); }}
+                <button onClick={cancelEdit}
                   className="bg-white/20 text-white font-semibold px-3 py-1.5 rounded-xl text-xs hover:bg-white/30">
                   Cancel
                 </button>
@@ -148,10 +248,11 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
             )}
           </div>
 
+          {/* Inner tabs */}
           <div className="flex gap-1 mt-3">
             {PROFILE_TABS.map((t) => (
               <button key={t.id} onClick={() => setActiveTab(t.id)}
-                className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${
                   activeTab === t.id ? "bg-white text-blue-700 shadow" : "text-blue-200 hover:bg-white/20"
                 }`}>
                 {t.label}
@@ -160,12 +261,13 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
           </div>
         </div>
 
-        {/* Body */}
+        {/* ── Scrollable Body ── */}
         <div className="overflow-y-auto flex-1 p-4 sm:p-5 space-y-4">
           {loading ? (
             <div className="text-center py-10 text-slate-400 text-sm">Loading profile…</div>
           ) : (
             <>
+              {/* OVERVIEW TAB */}
               {activeTab === "overview" && (
                 <>
                   <div className="grid grid-cols-3 gap-2">
@@ -185,6 +287,27 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
                       <div className="text-xs text-slate-500 mt-0.5">{isScholarship ? "Scholar" : "Total Paid"}</div>
                     </div>
                   </div>
+
+                  {/* DOB / Age / Gender info card */}
+                  {(student.dob || (student.gender && student.gender !== "Not specified")) && (
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 flex flex-wrap gap-4">
+                      {student.dob && (
+                        <div>
+                          <div className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-0.5">Date of Birth</div>
+                          <div className="text-sm font-semibold text-slate-800">
+                            {fmtDob(student.dob)}
+                            {age !== null && <span className="ml-2 text-xs text-slate-500 font-normal">({age} years old)</span>}
+                          </div>
+                        </div>
+                      )}
+                      {student.gender && (
+                        <div>
+                          <div className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-0.5">Gender</div>
+                          <div className="text-sm font-semibold text-slate-800">{student.gender}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {totalMarked > 0 && (
                     <div>
@@ -228,6 +351,7 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
                 </>
               )}
 
+              {/* PROGRESS TAB */}
               {activeTab === "progress" && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between flex-wrap gap-2">
@@ -242,6 +366,7 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
                 </div>
               )}
 
+              {/* PAYMENTS TAB */}
               {activeTab === "payments" && (
                 <div>
                   <div className="flex items-center gap-2 mb-3">
@@ -263,7 +388,11 @@ export default function StudentProfile({ student, onClose, onUpdated }) {
                             {p.deduction > 0 && <span className="text-xs text-amber-600">−Rs.{Number(p.deduction).toLocaleString()} deducted</span>}
                             <div className="text-xs text-slate-400">{fmtDate(p.paidAt)}</div>
                           </div>
-                          <span className={`text-sm font-extrabold shrink-0 ${p.paymentType === "scholarship" ? "text-purple-600" : "text-green-700"}`}>
+                          <span className={`text-sm font-extrabold shrink-0 ${
+                            p.paymentType === "scholarship" ? "text-purple-600"
+                            : p.paymentType === "registration" ? "text-blue-600"
+                            : "text-green-700"
+                          }`}>
                             {p.paymentType === "scholarship" ? "🎓 Free" : `Rs.${Number(p.amount).toLocaleString()}`}
                           </span>
                         </li>

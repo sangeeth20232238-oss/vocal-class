@@ -1,9 +1,9 @@
 // src/components/AttendanceTracker.jsx
 import { useState, useEffect, useCallback } from "react";
-import { CalendarCheck, CheckCheck, ChevronLeft, CheckCircle2, UserCheck, UserX } from "lucide-react";
+import { CalendarCheck, CheckCheck, ChevronLeft, CheckCircle2, UserCheck, UserX, Users } from "lucide-react";
 import toast from "react-hot-toast";
 import { setAttendance, getAttendanceForDate, parseFirebaseError } from "../firestoreService";
-import { LOCATION_SCHEDULE, getScheduledDates } from "../scheduleConfig";
+import { LOCATION_SCHEDULE, LOCATION_CLASS_GROUPS, getScheduledDates } from "../scheduleConfig";
 
 const todayStr     = () => new Date().toISOString().split("T")[0];
 const fmtFull      = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-LK", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -11,12 +11,17 @@ const fmtShort     = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-LK"
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 
 function DatePickerStep({ activeLocation, onConfirm }) {
-  const [date, setDate]   = useState(todayStr());
-  const [month, setMonth] = useState(currentMonth());
-  const schedule          = LOCATION_SCHEDULE[activeLocation];
-  const scheduledDates    = getScheduledDates(activeLocation, month);
-  const isClassDay        = scheduledDates.includes(date);
-  const today             = todayStr();
+  const [date, setDate]         = useState(todayStr());
+  const [month, setMonth]       = useState(currentMonth());
+  const [classGroup, setClassGroup] = useState("");
+  const schedule                = LOCATION_SCHEDULE[activeLocation];
+  const scheduledDates          = getScheduledDates(activeLocation, month);
+  const isClassDay              = scheduledDates.includes(date);
+  const today                   = todayStr();
+  const classGroups             = LOCATION_CLASS_GROUPS[activeLocation] || [];
+
+  // Reset class group when location changes
+  useEffect(() => { setClassGroup(""); }, [activeLocation]);
 
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
@@ -38,6 +43,33 @@ function DatePickerStep({ activeLocation, onConfirm }) {
           <p className="text-blue-500 text-xs mt-0.5">Tap a scheduled date below, or pick manually.</p>
         </div>
 
+        {/* Class Group selector */}
+        {classGroups.length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">Class Group</p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setClassGroup("")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition-all ${
+                  classGroup === ""
+                    ? "bg-blue-700 border-blue-700 text-white"
+                    : "bg-white border-slate-200 text-slate-700 hover:border-blue-300"
+                }`}>
+                All Classes
+              </button>
+              {classGroups.map((g) => (
+                <button key={g.id} type="button" onClick={() => setClassGroup(g.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition-all ${
+                    classGroup === g.id
+                      ? "bg-violet-700 border-violet-700 text-white"
+                      : "bg-white border-slate-200 text-slate-700 hover:border-violet-400"
+                  }`}>
+                  {g.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center gap-2 flex-wrap">
           <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">Show month:</label>
           <input type="month" value={month} onChange={(e) => setMonth(e.target.value)}
@@ -56,7 +88,7 @@ function DatePickerStep({ activeLocation, onConfirm }) {
                 return (
                   <button key={d} onClick={() => setDate(d)}
                     disabled={!isPast && d !== today}
-                    className={`px-3 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
+                    className={`btn-inline-sm px-3 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
                       isSelected
                         ? "bg-blue-700 border-blue-700 text-white shadow-md"
                         : isPast
@@ -87,23 +119,33 @@ function DatePickerStep({ activeLocation, onConfirm }) {
           )}
         </div>
 
-        <button onClick={() => onConfirm(date)}
+        <button onClick={() => onConfirm(date, classGroup)}
           className="btn-primary w-full justify-center py-3.5 text-base">
           <CheckCircle2 size={20} />
-          Confirm — Mark attendance for this date
+          {classGroup
+            ? `Mark attendance — ${classGroups.find((g) => g.id === classGroup)?.label ?? classGroup}`
+            : "Mark attendance for all classes"}
         </button>
       </div>
     </div>
   );
 }
 
-function MarkingStep({ date, activeLocation, students, onBack }) {
+function MarkingStep({ date, classGroup, activeLocation, students, onBack }) {
   const [record, setRecord]   = useState({});
   const [loading, setLoading] = useState(true);
   const [marking, setMarking] = useState(false);
   const [done, setDone]       = useState(false);
 
-  const locationStudents = students.filter((s) => s.location === activeLocation);
+  const allLocationStudents = students.filter((s) => s.location === activeLocation);
+  const locationStudents = classGroup
+    ? allLocationStudents.filter((s) => s.classGroup === classGroup)
+    : allLocationStudents;
+
+  const classGroups    = LOCATION_CLASS_GROUPS[activeLocation] || [];
+  const classGroupLabel = classGroup
+    ? (classGroups.find((g) => g.id === classGroup)?.label ?? "Unknown Group")
+    : "All Classes";
 
   const loadAttendance = useCallback(async () => {
     setLoading(true);
@@ -140,13 +182,14 @@ function MarkingStep({ date, activeLocation, students, onBack }) {
   };
 
   const handleDone = () => {
+    // Only count unmarked students in the current group as blocking
     const unmarkedCount = locationStudents.filter((s) => !record[s.id]).length;
     if (unmarkedCount > 0) {
       toast(`${unmarkedCount} student${unmarkedCount > 1 ? "s are" : " is"} still unmarked.`, { duration: 5000, icon: "⚠️" });
       return;
     }
     setDone(true);
-    toast.success("Attendance saved for " + fmtShort(date) + "!");
+    toast.success(`Attendance saved for ${fmtShort(date)}${classGroup ? ` · ${classGroupLabel}` : ""}!`);
   };
 
   const presentCount  = locationStudents.filter((s) => record[s.id] === "present").length;
@@ -175,12 +218,12 @@ function MarkingStep({ date, activeLocation, students, onBack }) {
     <div className="glass-card rounded-2xl overflow-hidden">
       <div className="px-4 sm:px-5 py-4 text-white" style={{ background: "linear-gradient(135deg,#1d4ed8,#6d28d9)" }}>
         <div className="flex items-center gap-3 mb-3">
-          <button onClick={onBack} className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors shrink-0">
+          <button onClick={onBack} className="w-11 h-11 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors shrink-0">
             <ChevronLeft size={18} />
           </button>
           <div className="min-w-0">
             <h2 className="text-base font-extrabold truncate">{fmtFull(date)}</h2>
-            <p className="text-blue-200 text-xs">{activeLocation} · {locationStudents.length} students</p>
+            <p className="text-blue-200 text-xs">{activeLocation}{classGroupLabel ? ` · ${classGroupLabel}` : ""} · {locationStudents.length} students</p>
           </div>
         </div>
         <div>
@@ -269,14 +312,15 @@ function MarkingStep({ date, activeLocation, students, onBack }) {
 }
 
 export default function AttendanceTracker({ students, activeLocation }) {
-  const [confirmedDate, setConfirmedDate] = useState(null);
-  useEffect(() => { setConfirmedDate(null); }, [activeLocation]);
+  const [confirmedDate, setConfirmedDate]   = useState(null);
+  const [confirmedGroup, setConfirmedGroup] = useState("");
+  useEffect(() => { setConfirmedDate(null); setConfirmedGroup(""); }, [activeLocation]);
 
   return (
     <section className="max-w-2xl mx-auto">
       {!confirmedDate
-        ? <DatePickerStep activeLocation={activeLocation} onConfirm={setConfirmedDate} />
-        : <MarkingStep date={confirmedDate} activeLocation={activeLocation} students={students} onBack={() => setConfirmedDate(null)} />
+        ? <DatePickerStep activeLocation={activeLocation} onConfirm={(d, g) => { setConfirmedDate(d); setConfirmedGroup(g); }} />
+        : <MarkingStep date={confirmedDate} classGroup={confirmedGroup} activeLocation={activeLocation} students={students} onBack={() => { setConfirmedDate(null); setConfirmedGroup(""); }} />
       }
     </section>
   );

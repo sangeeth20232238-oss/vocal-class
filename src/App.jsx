@@ -30,6 +30,16 @@ export default function App() {
   const [activeLocation, setActiveLocation] = useState(null);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
 
+  // Close mobile location dropdown when clicking outside
+  useEffect(() => {
+    if (!locationMenuOpen) return;
+    const handler = (e) => {
+      if (!e.target.closest("[data-location-menu]")) setLocationMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [locationMenuOpen]);
+
   const loadStudents = useCallback(async () => {
     try {
       const data = await getStudents();
@@ -109,7 +119,7 @@ export default function App() {
                 const c = LOCATION_COLORS[loc];
                 return (
                   <button key={loc} onClick={() => setActiveLocation(loc)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 ${
+                    className={`btn-inline-sm px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 ${
                       isActive
                         ? "bg-white text-slate-900 shadow-sm"
                         : "text-slate-400 hover:text-white hover:bg-white/10"
@@ -122,9 +132,9 @@ export default function App() {
             </div>
 
             {/* Mobile: dropdown */}
-            <div className="sm:hidden relative">
+            <div className="sm:hidden relative" data-location-menu>
               <button onClick={() => setLocationMenuOpen((o) => !o)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${locColor.pill} border-current`}>
+                className={`btn-inline-sm flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${locColor.pill} border-current`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${locColor.dot}`} />
                 {activeLocation}
                 <ChevronDown size={12} className={`transition-transform ${locationMenuOpen ? "rotate-180" : ""}`} />
@@ -134,7 +144,7 @@ export default function App() {
                   style={{ background: "rgba(10, 22, 40, 0.97)", backdropFilter: "blur(20px)" }}>
                   {LOCATIONS.map((loc) => (
                     <button key={loc} onClick={() => { setActiveLocation(loc); setLocationMenuOpen(false); }}
-                      className={`w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors flex items-center gap-2 ${
+                      className={`btn-inline-sm w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors flex items-center gap-2 ${
                         activeLocation === loc ? "text-white bg-white/10" : "text-slate-300 hover:text-white hover:bg-white/5"
                       }`}>
                       <span className={`w-2 h-2 rounded-full ${LOCATION_COLORS[loc]?.dot}`} />

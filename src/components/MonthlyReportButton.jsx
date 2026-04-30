@@ -1,5 +1,5 @@
 // src/components/MonthlyReportButton.jsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Send, FileSpreadsheet, X, CheckCircle2 } from "lucide-react";
 import emailjs from "@emailjs/browser";
 import toast from "react-hot-toast";
@@ -27,6 +27,16 @@ export default function MonthlyReportButton({ month, students, locations }) {
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState(null);
 
+  const closeModal = () => { setOpen(false); setPreview(null); };
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (e.key === "Escape") closeModal(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handlePreview = async () => {
     setLoading(true);
     try {
@@ -48,7 +58,7 @@ export default function MonthlyReportButton({ month, students, locations }) {
         { to_email: REPORT_EMAIL, subject: `Vocal Class Monthly Report — ${monthLabel(month)}`, message: summary, month: monthLabel(month) },
         EMAILJS_PUBLIC_KEY);
       toast.success("Report emailed and Excel downloaded!");
-      setOpen(false); setPreview(null);
+      closeModal();
     } catch (err) {
       toast.error(parseFirebaseError(err, "Email failed. Excel was still downloaded."));
     } finally { setLoading(false); }
@@ -68,20 +78,18 @@ export default function MonthlyReportButton({ month, students, locations }) {
   return (
     <>
       <div className="flex gap-2 flex-wrap">
-        <button onClick={handlePreview} disabled={loading}
-          className="btn-primary text-sm">
+        <button onClick={handlePreview} disabled={loading} className="btn-primary text-sm">
           <Send size={15} />
           {loading ? "Preparing…" : "Email Report"}
         </button>
-        <button onClick={handleDownloadOnly} disabled={loading}
-          className="btn-success text-sm">
+        <button onClick={handleDownloadOnly} disabled={loading} className="btn-success text-sm">
           <FileSpreadsheet size={15} />
           {loading ? "…" : "Download Excel"}
         </button>
       </div>
 
       {open && preview && (
-        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setOpen(false)}>
+        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={closeModal}>
           <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" />
           <div className="relative bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-2xl max-h-[92vh] overflow-y-auto animate-scale-in"
             onClick={(e) => e.stopPropagation()}>
@@ -92,7 +100,7 @@ export default function MonthlyReportButton({ month, students, locations }) {
                 <h3 className="text-base font-extrabold flex items-center gap-2"><Send size={16} /> Send Monthly Report</h3>
                 <p className="text-indigo-200 text-xs mt-0.5">{monthLabel(month)}</p>
               </div>
-              <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors">
+              <button onClick={closeModal} className="w-11 h-11 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors shrink-0">
                 <X size={18} />
               </button>
             </div>
@@ -109,14 +117,14 @@ export default function MonthlyReportButton({ month, students, locations }) {
               <div className="bg-slate-50 rounded-xl px-4 py-3">
                 <div className="text-xs font-bold text-slate-600 mb-2">Excel report includes:</div>
                 <ul className="space-y-1 text-xs text-slate-600">
-                  <li>✅ Summary — all cities, totals, pending</li>
+                  <li>✅ Summary — all cities, class groups, totals, pending</li>
                   {locations.map((loc) => <li key={loc}>📍 {loc} — Attendance + Payments + Progress Notes</li>)}
                 </ul>
               </div>
 
               <div>
                 <div className="text-xs font-bold text-slate-600 mb-1.5">Email preview:</div>
-                <pre className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-xs text-slate-600 whitespace-pre-wrap max-h-36 overflow-y-auto font-mono">
+                <pre className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-xs text-slate-600 whitespace-pre-wrap max-h-48 overflow-y-auto font-mono">
                   {preview.summary}
                 </pre>
               </div>
@@ -131,8 +139,7 @@ export default function MonthlyReportButton({ month, students, locations }) {
                   <Send size={15} />
                   {loading ? "Sending…" : "Send Email + Download"}
                 </button>
-                <button onClick={() => setOpen(false)}
-                  className="btn-ghost px-4 py-3 text-sm">
+                <button onClick={closeModal} className="btn-ghost px-4 py-3 text-sm">
                   Cancel
                 </button>
               </div>

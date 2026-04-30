@@ -39,6 +39,7 @@ export default function ProgressNotes({ student, currentMonth }) {
 
   useEffect(() => {
     setLoading(true);
+    setDrafts({});
     getProgressForStudent(student.id)
       .then((records) => {
         const map = {};
@@ -46,11 +47,11 @@ export default function ProgressNotes({ student, currentMonth }) {
           map[`${r.yearMonth}_W${r.weekNum}`] = { note: r.note, updatedAt: r.updatedAt };
         });
         setNotes(map);
-        // Pre-fill drafts with saved notes
         const d = {};
         records.forEach((r) => { d[`${r.yearMonth}_W${r.weekNum}`] = r.note; });
         setDrafts(d);
       })
+      .catch(() => toast.error("Could not load progress notes."))
       .finally(() => setLoading(false));
   }, [student.id, currentMonth]);
 
@@ -60,7 +61,7 @@ export default function ProgressNotes({ student, currentMonth }) {
     try {
       await saveProgressNote(student.id, student.name, student.location, currentMonth, slot.weekNum, text);
       setNotes((prev) => ({ ...prev, [slot.key]: { note: text, updatedAt: { seconds: Date.now() / 1000 } } }));
-      toast.success(`Progress saved for ${student.name} — ${slot.label}`);
+      toast.success(`Week ${slot.weekNum} progress saved for ${student.name}!`);
     } catch (err) {
       toast.error(parseFirebaseError(err, "Could not save. Please try again."));
     } finally {

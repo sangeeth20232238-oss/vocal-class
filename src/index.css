@@ -35,8 +35,21 @@ body {
 
 * { -webkit-tap-highlight-color: transparent; }
 
+/* ── Touch targets (WCAG AA mobile minimum 44px) ──────────────────────────── */
+button, [role="button"] {
+  min-height: 44px;
+  min-width: 44px;
+}
+/* Override for small inline badges/actions that intentionally break this */
+.btn-inline-sm {
+  min-height: unset;
+  min-width: unset;
+}
+
 /* ── Safe area ─────────────────────────────────────────────────────────────── */
-.safe-area-pb { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.safe-area-pb {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+}
 
 /* ── Glass card ────────────────────────────────────────────────────────────── */
 .glass-card {

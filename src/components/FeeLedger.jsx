@@ -1,69 +1,162 @@
 // src/components/FeeLedger.jsx
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Wallet, Search, CheckCircle, Clock, ChevronDown, ChevronUp, GraduationCap, Banknote, Receipt } from "lucide-react";
+import { Wallet, Search, CheckCircle, Clock, ChevronDown, ChevronUp, GraduationCap, Banknote, Receipt, Trash2, ClipboardList } from "lucide-react";
 import toast from "react-hot-toast";
-import { recordPayment, getPayments, parseFirebaseError } from "../firestoreService";
+import { recordPayment, getPayments, deletePayment, parseFirebaseError, getRegisteredStudentIds } from "../firestoreService";
+import { LOCATION_CLASS_GROUPS } from "../scheduleConfig";
+import ConfirmActionModal from "./ConfirmActionModal";
 
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 const MONTHLY_FEE  = 4500;
 const TERM_FEE     = 12000;
+const REG_FEE      = 1000;
 
 const fmtDate = (ts) => {
   if (!ts?.seconds) return "";
   return new Date(ts.seconds * 1000).toLocaleDateString("en-LK", { day: "numeric", month: "short", year: "numeric" });
 };
 
+// Returns "YYYY-MM" from a Firestore timestamp or null
+const tsToMonth = (ts) => {
+  if (!ts?.seconds) return null;
+  return new Date(ts.seconds * 1000).toISOString().slice(0, 7);
+};
+
 const PAY_TYPES = [
-  { id: "monthly",     label: "Monthly",     default: MONTHLY_FEE, color: "bg-green-100 text-green-700",   badge: "📅" },
-  { id: "term",        label: "Term Fee",    default: TERM_FEE,    color: "bg-indigo-100 text-indigo-700", badge: "🗓️" },
-  { id: "scholarship", label: "Scholarship", default: 0,           color: "bg-purple-100 text-purple-700", badge: "🎓" },
+  { id: "monthly",      label: "Monthly",      default: MONTHLY_FEE, color: "bg-green-100 text-green-700",   badge: "📅" },
+  { id: "term",         label: "Term Fee",     default: TERM_FEE,    color: "bg-indigo-100 text-indigo-700", badge: "🗓️" },
+  { id: "registration", label: "Registration", default: REG_FEE,     color: "bg-blue-100 text-blue-700",     icon: ClipboardList },
+  { id: "scholarship",  label: "Scholarship",  default: 0,           color: "bg-purple-100 text-purple-700", badge: "🎓" },
 ];
 
 function payTypeConfig(id) { return PAY_TYPES.find((t) => t.id === id) || PAY_TYPES[0]; }
 
 function PayTypeBadge({ type }) {
   const cfg = payTypeConfig(type);
-  return <span className={`badge ${cfg.color}`}>{cfg.badge} {cfg.label}</span>;
+  const Icon = cfg.icon;
+  return (
+    <span className={`badge ${cfg.color} inline-flex items-center gap-1`}>
+      {Icon ? <Icon size={11} /> : cfg.badge} {cfg.label}
+    </span>
+  );
 }
 
-function PayTypeSelector({ value, onChange }) {
+function PayTypeSelector({ value, onChange, exclude = [] }) {
   return (
     <div className="flex flex-wrap gap-2">
-      {PAY_TYPES.map((t) => (
-        <button key={t.id} type="button" onClick={() => onChange(t.id)}
-          className={`px-3 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
-            value === t.id
-              ? "bg-blue-700 border-blue-700 text-white shadow-sm"
-              : "bg-white border-slate-200 text-slate-700 hover:border-blue-300"
-          }`}>
-          {t.badge} {t.label}
-        </button>
-      ))}
+      {PAY_TYPES.filter((t) => !exclude.includes(t.id)).map((t) => {
+        const Icon = t.icon;
+        return (
+          <button key={t.id} type="button" onClick={() => onChange(t.id)}
+            className={`px-3 py-2 rounded-xl text-sm font-bold border-2 transition-all inline-flex items-center gap-1.5 ${
+              value === t.id
+                ? "bg-blue-700 border-blue-700 text-white shadow-sm"
+                : "bg-white border-slate-200 text-slate-700 hover:border-blue-300"
+            }`}>
+            {Icon ? <Icon size={14} /> : t.badge} {t.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-function QuickPayRow({ student, month, onPaid }) {
+// ── Paid row with delete ──────────────────────────────────────────────────────
+function PaidRow({ p, onDeleted }) {
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting]     = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await deletePayment(p.id);
+      toast.success(`Payment for ${p.studentName} removed.`);
+      onDeleted(); // may unmount this component
+    } catch (err) {
+      // only update state if still mounted (error path — component stays)
+      if (mountedRef.current) {
+        toast.error(parseFirebaseError(err, "Could not remove payment."));
+        setDeleting(false);
+        setConfirming(false);
+      }
+    }
+  };
+
+  const amountDisplay = p.paymentType === "scholarship"
+    ? <span className="text-base font-extrabold text-purple-600">🎓 Free</span>
+    : p.paymentType === "registration"
+    ? <span className="text-base font-extrabold text-blue-600">Rs.{Number(p.amount).toLocaleString()}</span>
+    : <span className="text-base font-extrabold text-green-700">Rs.{Number(p.amount).toLocaleString()}</span>;
+
+  return (
+    <li className="py-2.5 px-3 flex justify-between items-center gap-2">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <PayTypeBadge type={p.paymentType} />
+        {p.deduction > 0 && <span className="text-xs text-amber-600 font-semibold">−Rs.{Number(p.deduction).toLocaleString()}</span>}
+        {p.paidAt && <span className="text-xs text-slate-400">{fmtDate(p.paidAt)}</span>}
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {amountDisplay}
+        {!confirming ? (
+          <button onClick={() => setConfirming(true)} title="Remove / correct this payment"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+            <Trash2 size={14} />
+          </button>
+        ) : (
+          <div className="flex items-center gap-1 bg-red-50 border border-red-200 rounded-xl px-2 py-1">
+            <span className="text-xs font-semibold text-red-700 hidden sm:block">Delete?</span>
+            <button onClick={handleDelete} disabled={deleting} className="btn-danger btn-inline-sm text-xs py-1 px-2">
+              {deleting ? "…" : "Yes"}
+            </button>
+            <button onClick={() => setConfirming(false)} className="btn-inline-sm text-slate-500 hover:text-slate-700 text-xs font-semibold px-1">No</button>
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+// ── Quick-pay row in Pending list ─────────────────────────────────────────────
+function QuickPayRow({ student, month, onPaid, regPaid }) {
   const [open, setOpen]           = useState(false);
   const [payType, setPayType]     = useState("monthly");
   const [amount, setAmount]       = useState(String(MONTHLY_FEE));
   const [deduction, setDeduction] = useState("0");
   const [saving, setSaving]       = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+
+  // Reset form whenever month changes or row is closed
+  useEffect(() => {
+    setOpen(false);
+    setPayType("monthly");
+    setAmount(String(MONTHLY_FEE));
+    setDeduction("0");
+  }, [month]);
 
   const isScholarship = payType === "scholarship";
+  // registration excluded — it's recorded separately via the main form
   const handleTypeChange = (t) => { setPayType(t); setAmount(String(payTypeConfig(t).default)); setDeduction("0"); };
   const net = isScholarship ? 0 : Math.max(0, Number(amount) - Number(deduction || 0));
 
-  const handlePay = async () => {
+  const reset = () => { setOpen(false); setReviewing(false); setPayType("monthly"); setAmount(String(MONTHLY_FEE)); setDeduction("0"); };
+
+  const handlePayClick = () => {
     if (!isScholarship) {
       const amt = Number(amount), ded = Number(deduction || 0);
       if (!amount || isNaN(amt) || amt <= 0) { toast.error("Please enter a valid amount."); return; }
-      if (ded < 0 || ded >= amt) { toast.error("Deduction cannot equal or exceed the amount."); return; }
+      if (ded < 0 || ded > amt) { toast.error("Deduction cannot exceed the amount."); return; }
     }
+    setReviewing(true);
+  };
+
+  const handlePay = async () => {
     setSaving(true);
     try {
       await recordPayment(student.id, student.name, month, net, student.location, payType, isScholarship ? 0 : Number(deduction || 0));
       toast.success(isScholarship ? `🎓 Scholarship recorded for ${student.name}!` : `Rs. ${net.toLocaleString()} recorded for ${student.name}!`);
+      reset();
       onPaid();
     } catch (err) {
       toast.error(parseFirebaseError(err, "Could not save. Please try again."));
@@ -79,7 +172,14 @@ function QuickPayRow({ student, month, onPaid }) {
           </div>
           <div className="min-w-0">
             <span className="text-sm font-semibold text-slate-800 truncate block">{student.name}</span>
-            <span className="badge bg-amber-100 text-amber-700 text-xs">{student.location}</span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="badge bg-amber-100 text-amber-700 text-xs">{student.location}</span>
+              {student.classGroup && (() => {
+                const groups = LOCATION_CLASS_GROUPS[student.location] || [];
+                const label  = groups.find((g) => g.id === student.classGroup)?.label;
+                return label ? <span className="badge bg-violet-100 text-violet-700 text-xs">{label}</span> : null;
+              })()}
+            </div>
           </div>
         </div>
         <button onClick={() => setOpen((o) => !o)}
@@ -87,12 +187,18 @@ function QuickPayRow({ student, month, onPaid }) {
           <Banknote size={14} /> Mark Paid {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
         </button>
       </div>
+      {!regPaid && (
+        <div className="px-4 py-1.5 bg-orange-50 border-t border-orange-100 flex items-center gap-1.5">
+          <ClipboardList size={11} className="text-orange-500 shrink-0" />
+          <span className="text-xs font-semibold text-orange-700">Registration fee not yet recorded — use the orange section above to add it.</span>
+        </div>
+      )}
 
       {open && (
         <div className="border-t border-amber-100 bg-amber-50 px-4 py-4 space-y-3">
           <div>
             <p className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">Payment Type</p>
-            <PayTypeSelector value={payType} onChange={handleTypeChange} />
+            <PayTypeSelector value={payType} onChange={handleTypeChange} exclude={["registration"]} />
           </div>
           {isScholarship ? (
             <div className="bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 flex items-center gap-3">
@@ -119,20 +225,138 @@ function QuickPayRow({ student, month, onPaid }) {
             </div>
           )}
           <div className="flex gap-2 flex-wrap">
-            <button onClick={handlePay} disabled={saving}
+            <button onClick={handlePayClick} disabled={saving}
               className={`font-bold px-4 py-2 rounded-xl text-sm transition-colors disabled:opacity-60 text-white flex items-center gap-1.5 ${
                 isScholarship ? "bg-purple-600 hover:bg-purple-700" : "bg-green-600 hover:bg-green-700"
               }`}>
-              {saving ? "Saving…" : isScholarship ? "🎓 Confirm Scholarship" : `Confirm — Rs. ${net.toLocaleString()}`}
+              {saving
+                ? <><div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving…</>
+                : isScholarship ? "🎓 Review & Confirm" : `Review — Rs. ${net.toLocaleString()}`}
             </button>
-            <button onClick={() => setOpen(false)} className="text-slate-500 hover:text-slate-700 font-semibold text-sm px-2">Cancel</button>
+            <button onClick={reset} className="text-slate-500 hover:text-slate-700 font-semibold text-sm px-2">Cancel</button>
           </div>
         </div>
+      )}
+
+      {reviewing && (
+        <ConfirmActionModal
+          title="Confirm Payment"
+          rows={[
+            { label: "Student",      value: student.name },
+            { label: "Month",        value: month },
+            { label: "Payment Type", value: payType.charAt(0).toUpperCase() + payType.slice(1) },
+            { label: "Amount",       value: isScholarship ? "Scholarship (Free)" : `Rs. ${net.toLocaleString()}`, highlight: true },
+            ...(Number(deduction) > 0 ? [{ label: "Deduction", value: `Rs. ${Number(deduction).toLocaleString()}` }] : []),
+          ]}
+          onConfirm={() => { setReviewing(false); handlePay(); }}
+          onCancel={() => setReviewing(false)}
+          confirmLabel={isScholarship ? "🎓 Confirm Scholarship" : `Confirm — Rs. ${net.toLocaleString()}`}
+          confirmClass={isScholarship ? "bg-purple-600 hover:bg-purple-700" : "bg-green-600 hover:bg-green-700"}
+        />
       )}
     </li>
   );
 }
 
+// ── One-tap registration fee row for existing students ───────────────────────
+function RegFeeRow({ student, onPaid }) {
+  const [open, setOpen]         = useState(false);
+  const [amount, setAmount]     = useState(String(REG_FEE));
+  const [deduction, setDeduction] = useState("0");
+  const [saving, setSaving]     = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const month = new Date().toISOString().slice(0, 7);
+  const net   = Math.max(0, Number(amount) - Number(deduction || 0));
+
+  const handleClick = () => {
+    const amt = Number(amount), ded = Number(deduction || 0);
+    if (!amount || isNaN(amt) || amt < 0) { toast.error("Enter a valid amount."); return; }
+    if (ded > amt) { toast.error("Deduction cannot exceed amount."); return; }
+    setReviewing(true);
+  };
+
+  const handleSave = async () => {
+    setReviewing(false);
+    setSaving(true);
+    try {
+      await recordPayment(student.id, student.name, month, net, student.location, "registration", Number(deduction || 0));
+      toast.success(`Registration fee recorded for ${student.name}!`);
+      onPaid();
+    } catch (err) {
+      toast.error(parseFirebaseError(err, "Could not save."));
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <li className="bg-white overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 gap-2 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-sm font-extrabold text-orange-700 shrink-0">
+            {student.name.charAt(0).toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <span className="text-sm font-semibold text-slate-800 truncate block">{student.name}</span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="badge bg-orange-100 text-orange-700 text-xs">{student.location}</span>
+              {student.classGroup && (() => {
+                const groups = LOCATION_CLASS_GROUPS[student.location] || [];
+                const label  = groups.find((g) => g.id === student.classGroup)?.label;
+                return label ? <span className="badge bg-violet-100 text-violet-700 text-xs">{label}</span> : null;
+              })()}
+            </div>
+          </div>
+        </div>
+        <button onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white font-bold px-3 py-2 rounded-xl text-sm transition-colors shrink-0">
+          <ClipboardList size={14} /> Record Reg Fee {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        </button>
+      </div>
+      {open && (
+        <div className="border-t border-orange-100 bg-orange-50 px-4 py-3 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Fee (Rs.)</label>
+              <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} min="0" className="input-field" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Deduction (Rs.)</label>
+              <input type="number" value={deduction} onChange={(e) => setDeduction(e.target.value)} min="0" placeholder="0" className="input-field" />
+            </div>
+          </div>
+          {Number(deduction) > 0 && (
+            <p className="text-xs font-semibold text-orange-700">Net: Rs. {net.toLocaleString()}</p>
+          )}
+          <div className="flex gap-2">
+            <button onClick={handleClick} disabled={saving}
+              className="bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-bold px-4 py-2 rounded-xl text-sm flex items-center gap-1.5 transition-colors">
+              {saving
+                ? <><div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving…</>
+                : `Review — Rs. ${net.toLocaleString()}`}
+            </button>
+            <button onClick={() => setOpen(false)} className="text-slate-500 hover:text-slate-700 font-semibold text-sm px-2">Cancel</button>
+          </div>
+        </div>
+      )}
+      {reviewing && (
+        <ConfirmActionModal
+          title="Record Registration Fee"
+          rows={[
+            { label: "Student",    value: student.name },
+            { label: "Location",   value: student.location },
+            { label: "Fee",        value: `Rs. ${net.toLocaleString()}`, highlight: true },
+            { label: "Month",      value: month },
+          ]}
+          onConfirm={handleSave}
+          onCancel={() => setReviewing(false)}
+          confirmLabel={`Confirm — Rs. ${net.toLocaleString()}`}
+          confirmClass="bg-orange-600 hover:bg-orange-700"
+        />
+      )}
+    </li>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 export default function FeeLedger({ students, activeLocation }) {
   const [payments, setPayments]         = useState([]);
   const [studentId, setStudentId]       = useState("");
@@ -143,10 +367,21 @@ export default function FeeLedger({ students, activeLocation }) {
   const [amount, setAmount]             = useState(String(MONTHLY_FEE));
   const [deduction, setDeduction]       = useState("0");
   const [saving, setSaving]             = useState(false);
+  const [reviewPayment, setReviewPayment] = useState(null);
+  const [regPaidIds, setRegPaidIds]       = useState(new Set());
   const searchRef = useRef(null);
 
   const isScholarship = payType === "scholarship";
   const locationStudents = activeLocation === "All" ? students : students.filter((s) => s.location === activeLocation);
+
+  // FIX: only show students who existed at or before the selected month
+  const eligibleStudents = locationStudents.filter((s) => {
+    const joined = tsToMonth(s.createdAt);
+    return !joined || joined <= month;
+  });
+
+  // Search across ALL location students (not just eligible) so Aunty can
+  // record a payment for any student regardless of join month
   const filtered = locationStudents.filter((s) => s.name.toLowerCase().includes(searchText.toLowerCase()));
   const selectStudent = (s) => { setStudentId(s.id); setSearchText(s.name); setShowDropdown(false); };
 
@@ -159,7 +394,11 @@ export default function FeeLedger({ students, activeLocation }) {
   const handleTypeChange = (t) => { setPayType(t); setAmount(String(payTypeConfig(t).default)); setDeduction("0"); };
 
   const loadPayments = useCallback(async () => {
-    try { setPayments(await getPayments()); }
+    try {
+      const [pmts, regIds] = await Promise.all([getPayments(), getRegisteredStudentIds()]);
+      setPayments(pmts);
+      setRegPaidIds(regIds);
+    }
     catch (err) { toast.error(parseFirebaseError(err, "Could not load payments.")); }
   }, []);
 
@@ -167,14 +406,28 @@ export default function FeeLedger({ students, activeLocation }) {
 
   const net = isScholarship ? 0 : Math.max(0, Number(amount) - Number(deduction || 0));
 
-  const handleRecord = async () => {
+  // Reset student selection when month changes
+  useEffect(() => {
+    setStudentId("");
+    setSearchText("");
+    setDeduction("0");
+  }, [month]);
+
+  const handleRecord = () => {
     if (!studentId) { toast.error("Please select a student."); return; }
     if (!isScholarship) {
       const amt = Number(amount), ded = Number(deduction || 0);
       if (!amount || isNaN(amt) || amt <= 0) { toast.error("Please enter a valid amount."); return; }
-      if (ded < 0 || ded >= amt) { toast.error("Deduction cannot equal or exceed the amount."); return; }
+      if (ded < 0 || ded > amt) { toast.error("Deduction cannot exceed the amount."); return; }
     }
     const student = students.find((s) => s.id === studentId);
+    const isDupe  = monthPayments.some((p) => p.studentId === studentId && p.paymentType === payType);
+    setReviewPayment({ student, isDupe });
+  };
+
+  const handleConfirmRecord = async () => {
+    const student = reviewPayment?.student;
+    setReviewPayment(null);
     setSaving(true);
     try {
       await recordPayment(studentId, student.name, month, net, student.location, payType, isScholarship ? 0 : Number(deduction || 0));
@@ -190,12 +443,20 @@ export default function FeeLedger({ students, activeLocation }) {
     .filter((p) => p.month === month && (activeLocation === "All" || p.location === activeLocation))
     .sort((a, b) => (b.paidAt?.seconds || 0) - (a.paidAt?.seconds || 0));
 
-  const paidIds      = new Set(monthPayments.map((p) => p.studentId));
-  const pending      = locationStudents.filter((s) => !paidIds.has(s.id));
-  const total        = monthPayments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const termPmts     = monthPayments.filter((p) => p.paymentType === "term");
-  const monthlyPmts  = monthPayments.filter((p) => p.paymentType === "monthly");
-  const scholarships = monthPayments.filter((p) => p.paymentType === "scholarship");
+  // A student is "paid" only if they have a monthly/term/scholarship payment (registration alone doesn't count)
+  const paidIds = new Set(
+    monthPayments
+      .filter((p) => p.paymentType !== "registration")
+      .map((p) => p.studentId)
+  );
+  const pending            = eligibleStudents.filter((s) => !paidIds.has(s.id));
+  const total              = monthPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+  const termPmts           = monthPayments.filter((p) => p.paymentType === "term");
+  const monthlyPmts        = monthPayments.filter((p) => p.paymentType === "monthly");
+  const scholarships       = monthPayments.filter((p) => p.paymentType === "scholarship");
+  const regPmts            = monthPayments.filter((p) => p.paymentType === "registration");
+  // Students who have NEVER had a registration payment recorded (across all time)
+  const unregistered       = locationStudents.filter((s) => !regPaidIds.has(s.id));
 
   return (
     <section className="space-y-5">
@@ -235,6 +496,27 @@ export default function FeeLedger({ students, activeLocation }) {
         })}
       </div>
 
+      {/* ── Registration alert — students with NO reg payment ever ── */}
+      {unregistered.length > 0 && (
+        <div className="rounded-2xl border-2 border-orange-400 bg-orange-50 overflow-hidden">
+          <div className="px-4 py-3 flex items-center gap-3" style={{ background: "linear-gradient(135deg,#ea580c,#c2410c)" }}>
+            <ClipboardList size={20} className="text-white shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-white font-extrabold text-sm">
+                {unregistered.length} student{unregistered.length !== 1 ? "s" : ""} — registration fee not recorded
+              </p>
+              <p className="text-orange-200 text-xs mt-0.5">These students were added before registration tracking. Record their fee now.</p>
+            </div>
+            <span className="bg-white/20 text-white text-xs font-extrabold px-2.5 py-1 rounded-full shrink-0">{unregistered.length}</span>
+          </div>
+          <ul className="divide-y divide-orange-100">
+            {unregistered.map((s) => (
+              <RegFeeRow key={s.id} student={s} onPaid={loadPayments} />
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Scholarship banner */}
       {scholarships.length > 0 && (
         <div className="glass-card rounded-2xl px-4 py-3 flex items-center gap-3 border-l-4 border-purple-500">
@@ -242,6 +524,17 @@ export default function FeeLedger({ students, activeLocation }) {
           <div>
             <p className="text-sm font-bold text-purple-800">{scholarships.length} Scholarship Student{scholarships.length > 1 ? "s" : ""} this month</p>
             <p className="text-xs text-purple-600">{scholarships.map((p) => p.studentName).join(", ")}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Registration fee banner */}
+      {regPmts.length > 0 && (
+        <div className="glass-card rounded-2xl px-4 py-3 flex items-center gap-3 border-l-4 border-blue-400">
+          <ClipboardList size={20} className="text-blue-500 shrink-0" />
+          <div>
+            <p className="text-sm font-bold text-blue-800">{regPmts.length} Registration Fee{regPmts.length > 1 ? "s" : ""} collected this month</p>
+            <p className="text-xs text-blue-600">{regPmts.map((p) => p.studentName).join(", ")}</p>
           </div>
         </div>
       )}
@@ -254,6 +547,7 @@ export default function FeeLedger({ students, activeLocation }) {
           </div>
           Record a Payment
         </div>
+        <p className="text-xs text-slate-400 mb-3">Use <strong>Registration</strong> for one-time enrolment fees. Use <strong>Monthly</strong> or <strong>Term Fee</strong> for recurring payments.</p>
 
         <div className="mb-4">
           <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">Payment Type</label>
@@ -288,10 +582,7 @@ export default function FeeLedger({ students, activeLocation }) {
             )}
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1.5">Month</label>
-            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="input-field" />
-          </div>
+
 
           {!isScholarship && (
             <>
@@ -314,13 +605,41 @@ export default function FeeLedger({ students, activeLocation }) {
           </div>
         )}
 
-        <button onClick={handleRecord} disabled={saving}
-          className={`mt-4 flex items-center gap-2 font-bold px-5 py-2.5 rounded-xl text-sm transition-colors disabled:opacity-60 text-white ${
+        <button onClick={handleRecord} disabled={saving || !studentId}
+          className={`mt-4 flex items-center gap-2 font-bold px-5 py-2.5 rounded-xl text-sm transition-colors disabled:opacity-50 text-white ${
             isScholarship ? "bg-purple-600 hover:bg-purple-700" : "bg-blue-700 hover:bg-blue-800"
           }`}>
-          {saving ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving…</> : isScholarship ? "🎓 Record Scholarship" : `Save — Rs. ${net.toLocaleString()}`}
+          {saving ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving…</> : isScholarship ? "🎓 Record Scholarship" : `Review & Save — Rs. ${net.toLocaleString()}`}
         </button>
       </div>
+
+      {reviewPayment && (() => {
+        const { student, isDupe } = reviewPayment;
+        const cgLabel = (() => {
+          const groups = LOCATION_CLASS_GROUPS[student?.location] || [];
+          return groups.find((g) => g.id === student?.classGroup)?.label || null;
+        })();
+        const rows = [
+          { label: "Student",      value: student?.name },
+          { label: "Location",     value: student?.location },
+          ...(cgLabel ? [{ label: "Class Group", value: cgLabel }] : []),
+          { label: "Month",        value: month },
+          { label: "Payment Type", value: payType.charAt(0).toUpperCase() + payType.slice(1) },
+          { label: "Amount",       value: isScholarship ? "Scholarship (Free)" : `Rs. ${net.toLocaleString()}`, highlight: true },
+          ...(Number(deduction) > 0 ? [{ label: "Deduction", value: `Rs. ${Number(deduction).toLocaleString()}` }] : []),
+        ];
+        return (
+          <ConfirmActionModal
+            title="Review Payment"
+            rows={rows}
+            warning={isDupe ? `${student?.name} already has a ${payType} payment for ${month}. Recording another one.` : undefined}
+            onConfirm={handleConfirmRecord}
+            onCancel={() => setReviewPayment(null)}
+            confirmLabel={isScholarship ? "🎓 Confirm Scholarship" : `Confirm — Rs. ${net.toLocaleString()}`}
+            confirmClass={isScholarship ? "bg-purple-600 hover:bg-purple-700" : "bg-green-600 hover:bg-green-700"}
+          />
+        );
+      })()}
 
       {/* Pending */}
       <div className="rounded-2xl p-4 sm:p-6 border border-amber-200 bg-amber-50/80 backdrop-blur">
@@ -339,38 +658,65 @@ export default function FeeLedger({ students, activeLocation }) {
           </div>
         ) : (
           <ul className="space-y-2 sm:space-y-3">
-            {pending.map((s) => <QuickPayRow key={s.id} student={s} month={month} onPaid={loadPayments} />)}
+            {pending.map((s) => <QuickPayRow key={s.id} student={s} month={month} onPaid={loadPayments} regPaid={regPaidIds.has(s.id)} />)}
           </ul>
         )}
       </div>
 
-      {/* Paid */}
+      {/* Paid — grouped by student */}
       <div className="rounded-2xl p-4 sm:p-6 border border-green-200 bg-green-50/80 backdrop-blur">
         <div className="section-header text-green-800">
           <CheckCircle size={18} className="text-green-600" />
           Paid — {month}
-          <span className="badge bg-green-200 text-green-800 ml-auto">{monthPayments.length}</span>
+          <span className="badge bg-green-200 text-green-800 ml-auto">{paidIds.size} student{paidIds.size !== 1 ? "s" : ""}</span>
         </div>
         {monthPayments.length === 0 ? (
           <p className="text-slate-400 text-sm text-center py-4">No payments recorded yet.</p>
         ) : (
-          <ul className="divide-y divide-green-100">
-            {monthPayments.map((p) => (
-              <li key={p.id} className="py-3 flex justify-between items-start gap-2">
-                <div className="min-w-0">
-                  <span className="text-sm font-semibold text-slate-800 block truncate">{p.studentName}</span>
-                  <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-                    <PayTypeBadge type={p.paymentType} />
-                    {p.deduction > 0 && <span className="text-xs text-amber-600 font-semibold">−Rs.{Number(p.deduction).toLocaleString()}</span>}
-                    {p.paidAt && <span className="text-xs text-slate-400">{fmtDate(p.paidAt)}</span>}
+          <>
+            <p className="text-xs text-slate-400 mb-3 flex items-center gap-1">
+              <Trash2 size={11} /> Tap the bin icon to undo / correct a wrong entry.
+            </p>
+            <ul className="space-y-3">
+              {/* Group payments by student */}
+              {Array.from(
+                monthPayments.reduce((map, p) => {
+                  if (!map.has(p.studentId)) map.set(p.studentId, { name: p.studentName, main: [], reg: [] });
+                  const entry = map.get(p.studentId);
+                  if (p.paymentType === "registration") entry.reg.push(p);
+                  else entry.main.push(p);
+                  return map;
+                }, new Map())
+              ).map(([sid, { name, main, reg }]) => (
+                <li key={sid} className="bg-white rounded-xl border border-green-100 overflow-hidden">
+                  <div className="px-3 py-2 bg-green-50 border-b border-green-100 flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-green-200 flex items-center justify-center text-xs font-extrabold text-green-800 shrink-0">
+                      {name.charAt(0).toUpperCase()}
+                    </div>
+                    <span className="text-sm font-bold text-slate-800">{name}</span>
+                    {(() => {
+                      const st = students.find((s) => s.id === sid);
+                      if (!st?.classGroup) return null;
+                      const groups = LOCATION_CLASS_GROUPS[st.location] || [];
+                      const label  = groups.find((g) => g.id === st.classGroup)?.label;
+                      return label ? <span className="badge bg-violet-100 text-violet-700 text-xs ml-1">{label}</span> : null;
+                    })()}
+                    {!regPaidIds.has(sid) && (
+                      <span className="badge bg-orange-100 text-orange-700 text-xs ml-1 inline-flex items-center gap-0.5">
+                        <ClipboardList size={9} /> Reg unpaid
+                      </span>
+                    )}
                   </div>
-                </div>
-                <span className={`text-base font-extrabold shrink-0 ${p.paymentType === "scholarship" ? "text-purple-600" : "text-green-700"}`}>
-                  {p.paymentType === "scholarship" ? "🎓 Free" : `Rs.${Number(p.amount).toLocaleString()}`}
-                </span>
-              </li>
-            ))}
-          </ul>
+                  <ul className="divide-y divide-green-50">
+                    {main.map((p) => <PaidRow key={p.id} p={p} onDeleted={loadPayments} />)}
+                    {reg.map((p) => (
+                      <PaidRow key={p.id} p={p} onDeleted={loadPayments} />
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </div>
 

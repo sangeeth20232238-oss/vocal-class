@@ -11,8 +11,45 @@ export const parseFirebaseError = (err, fallback) => {
 };
 
 // ── Students ──────────────────────────────────────────────────────────────────
-export const addStudent = (name, phone, location) =>
-  addDoc(collection(db, "students"), { name, phone, location, createdAt: serverTimestamp() });
+export const addStudent = (name, phone, location, dob = "", gender = "", registrationFee = 1000, registrationDeduction = 0, classGroup = "") =>
+  addDoc(collection(db, "students"), { name, phone, location, dob, gender, classGroup, registrationFee: Number(registrationFee), registrationDeduction: Number(registrationDeduction), createdAt: serverTimestamp() });
+
+// One-time migration: fills dummy dob/gender for students that don't have them yet
+export const migrateMissingDobGender = async () => {
+  const snap = await getDocs(collection(db, "students"));
+  const batch = writeBatch(db);
+  let count = 0;
+  snap.docs.forEach((d) => {
+    const data = d.data();
+    if (!data.dob || !data.gender) {
+      batch.set(doc(db, "students", d.id), {
+        dob:    data.dob    || "2000-01-01",
+        gender: data.gender || "Female",
+      }, { merge: true });
+      count++;
+    }
+  });
+  if (count > 0) await batch.commit();
+  return count;
+};
+
+// Migration: assigns classGroup to existing students who don't have one yet.
+// Uses DOB to auto-suggest; falls back to "unknown" so Aunty can fix manually.
+export const migrateClassGroups = async (suggestFn) => {
+  const snap = await getDocs(collection(db, "students"));
+  const batch = writeBatch(db);
+  let count = 0;
+  snap.docs.forEach((d) => {
+    const data = d.data();
+    if (!data.classGroup) {
+      const suggested = suggestFn(data.location, data.dob) || "unknown";
+      batch.set(doc(db, "students", d.id), { classGroup: suggested }, { merge: true });
+      count++;
+    }
+  });
+  if (count > 0) await batch.commit();
+  return count;
+};
 
 export const getStudents = async () => {
   const snap = await getDocs(collection(db, "students"));
@@ -71,16 +108,66 @@ export const getAttendanceForStudent = async (studentId) => {
 };
 
 // ── Payments ──────────────────────────────────────────────────────────────────
-// paymentType: "monthly" | "term" | "scholarship"
+// paymentType: "monthly" | "term" | "scholarship" | "registration"
 export const recordPayment = (studentId, studentName, month, amount, location, paymentType = "monthly", deduction = 0) =>
   addDoc(collection(db, "payments"), {
     studentId, studentName, month, amount: Number(amount), location,
     paymentType, deduction: Number(deduction), paidAt: serverTimestamp(),
   });
 
+// Called on new student registration — writes student doc + reg payment + first-month payment atomically
+export const addStudentWithPayments = async ({
+  name, phone, location, dob, gender, classGroup,
+  regFee, regDed,
+  firstPayType, firstAmount, firstDed,
+}) => {
+  const batch = writeBatch(db);
+  const month = new Date().toISOString().slice(0, 7);
+
+  // 1. Student document
+  const studentRef = doc(collection(db, "students"));
+  batch.set(studentRef, {
+    name, phone, location, dob, gender, classGroup: classGroup || "",
+    registrationFee: Number(regFee),
+    registrationDeduction: Number(regDed),
+    createdAt: serverTimestamp(),
+  });
+
+  // 2. Registration payment (always, even if Rs.0)
+  const regNet = Math.max(0, Number(regFee) - Number(regDed));
+  batch.set(doc(collection(db, "payments")), {
+    studentId: studentRef.id, studentName: name, month, location,
+    paymentType: "registration", amount: regNet, deduction: Number(regDed),
+    paidAt: serverTimestamp(),
+  });
+
+  // 3. First-month payment
+  const isScholarship = firstPayType === "scholarship";
+  const firstNet = isScholarship ? 0 : Math.max(0, Number(firstAmount) - Number(firstDed));
+  batch.set(doc(collection(db, "payments")), {
+    studentId: studentRef.id, studentName: name, month, location,
+    paymentType: firstPayType, amount: firstNet, deduction: isScholarship ? 0 : Number(firstDed),
+    paidAt: serverTimestamp(),
+  });
+
+  await batch.commit();
+  return studentRef.id;
+};
+
+export const updatePayment = (id, data) =>
+  setDoc(doc(db, "payments", id), data, { merge: true });
+
+export const deletePayment = (id) => deleteDoc(doc(db, "payments", id));
+
 export const getPayments = async () => {
   const snap = await getDocs(collection(db, "payments"));
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+};
+
+// Returns Set of studentIds who have a registration payment recorded (any month)
+export const getRegisteredStudentIds = async () => {
+  const snap = await getDocs(query(collection(db, "payments"), where("paymentType", "==", "registration")));
+  return new Set(snap.docs.map((d) => d.data().studentId));
 };
 
 // ── Progress Notes ────────────────────────────────────────────────────────────

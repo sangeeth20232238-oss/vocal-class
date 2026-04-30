@@ -1,7 +1,7 @@
 // src/components/Dashboard.jsx
 import { useState, useEffect, useCallback } from "react";
-import { LayoutDashboard, TrendingUp, MapPin, Calendar, Bell, FileSpreadsheet, Users, BookOpen, Banknote, Clock, CheckCircle2 } from "lucide-react";
-import { getAttendanceForMonth, getPayments } from "../firestoreService";
+import { LayoutDashboard, TrendingUp, MapPin, Calendar, Bell, FileSpreadsheet, Users, BookOpen, Banknote, Clock, CheckCircle2, ClipboardList } from "lucide-react";
+import { getAttendanceForMonth, getPayments, getRegisteredStudentIds } from "../firestoreService";
 import { getScheduledDates, LOCATION_SCHEDULE } from "../scheduleConfig";
 import MonthlyReportButton from "./MonthlyReportButton";
 
@@ -25,6 +25,7 @@ export default function Dashboard({ students, locations, activeLocation, onLocat
   const [month, setMonth]           = useState(currentMonth());
   const [attendanceData, setAttendanceData] = useState([]);
   const [payments, setPayments]     = useState([]);
+  const [regPaidIds, setRegPaidIds] = useState(new Set());
   const [loading, setLoading]       = useState(true);
 
   const locationStudents = students.filter((s) => s.location === activeLocation);
@@ -37,11 +38,12 @@ export default function Dashboard({ students, locations, activeLocation, onLocat
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [att, pay] = await Promise.all([getAttendanceForMonth(month), getPayments()]);
+      const [att, pay, regIds] = await Promise.all([getAttendanceForMonth(month), getPayments(), getRegisteredStudentIds()]);
       setAttendanceData(att);
       setPayments(pay);
+      setRegPaidIds(regIds);
     } finally { setLoading(false); }
-  }, [month]);
+  }, [month, activeLocation]); // re-run when location changes too
 
   useEffect(() => { load(); }, [load]);
 
@@ -54,11 +56,12 @@ export default function Dashboard({ students, locations, activeLocation, onLocat
     return { ...s, attended, rate };
   }).sort((a, b) => b.rate - a.rate);
 
-  const monthPayments = payments.filter((p) => p.month === month && p.location === activeLocation);
-  const paidIds       = new Set(monthPayments.map((p) => p.studentId));
-  const pendingCount  = locationStudents.filter((s) => !paidIds.has(s.id)).length;
-  const annualTotal   = monthPayments.filter((p) => p.paymentType === "annual" || p.paymentType === "term").reduce((s, p) => s + Number(p.amount), 0);
-  const monthlyTotal  = monthPayments.filter((p) => p.paymentType === "monthly").reduce((s, p) => s + Number(p.amount), 0);
+  const monthPayments     = payments.filter((p) => p.month === month && p.location === activeLocation);
+  const paidIds           = new Set(monthPayments.filter((p) => p.paymentType !== "registration").map((p) => p.studentId));
+  const pendingCount      = locationStudents.filter((s) => !paidIds.has(s.id)).length;
+  const unregisteredCount = locationStudents.filter((s) => !regPaidIds.has(s.id)).length;
+  const annualTotal       = monthPayments.filter((p) => p.paymentType === "annual" || p.paymentType === "term").reduce((s, p) => s + Number(p.amount), 0);
+  const monthlyTotal      = monthPayments.filter((p) => p.paymentType === "monthly").reduce((s, p) => s + Number(p.amount), 0);
 
   const statValues = {
     students: locationStudents.length,
@@ -133,6 +136,22 @@ export default function Dashboard({ students, locations, activeLocation, onLocat
             </div>
           </div>
           <MonthlyReportButton month={month} students={students} locations={locations} />
+        </div>
+      )}
+
+      {/* ── Registration alert ── */}
+      {unregisteredCount > 0 && (
+        <div className="rounded-2xl overflow-hidden border-2 border-orange-400">
+          <div className="px-4 py-3 flex items-center gap-3" style={{ background: "linear-gradient(135deg,#ea580c,#c2410c)" }}>
+            <ClipboardList size={18} className="text-white shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-white font-extrabold text-sm">
+                {unregisteredCount} student{unregisteredCount !== 1 ? "s" : ""} in {activeLocation} — registration fee not recorded
+              </p>
+              <p className="text-orange-200 text-xs mt-0.5">Go to Fees tab to record their registration fees.</p>
+            </div>
+            <span className="bg-white/20 text-white text-xs font-extrabold px-2.5 py-1 rounded-full shrink-0">{unregisteredCount}</span>
+          </div>
         </div>
       )}
 
@@ -223,7 +242,7 @@ export default function Dashboard({ students, locations, activeLocation, onLocat
         </div>
         {totalPassed > 0 && (
           <p className="text-slate-500 text-xs mb-4">
-            Based on {totalPassed} {schedule?.label.toLowerCase() ?? "class"} held so far
+            Based on {totalPassed} {totalPassed === 1 ? (schedule?.label.slice(0,-1) ?? "class") : (schedule?.label.toLowerCase() ?? "classes")} held so far
           </p>
         )}
 
@@ -281,9 +300,9 @@ export default function Dashboard({ students, locations, activeLocation, onLocat
             const locStudents = students.filter((s) => s.location === loc);
             const locPaid     = payments.filter((p) => p.month === month && p.location === loc);
             const locTotal    = locPaid.reduce((sum, p) => sum + Number(p.amount), 0);
-            const locPaidIds  = new Set(locPaid.map((p) => p.studentId));
+            const locPaidIds  = new Set(locPaid.filter((p) => p.paymentType !== "registration").map((p) => p.studentId));
             const locPending  = locStudents.filter((s) => !locPaidIds.has(s.id)).length;
-            const feeRate     = locStudents.length > 0 ? Math.round((locPaid.length / locStudents.length) * 100) : 0;
+            const feeRate     = locStudents.length > 0 ? Math.round((locPaidIds.size / locStudents.length) * 100) : 0;
             const locSched    = LOCATION_SCHEDULE[loc];
             const locDates    = getScheduledDates(loc, month);
             const locPassed   = passedScheduledDates(locDates).length;
