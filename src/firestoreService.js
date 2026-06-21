@@ -108,7 +108,53 @@ export const getAttendanceForStudent = async (studentId) => {
 };
 
 // ── Payments ──────────────────────────────────────────────────────────────────
-// paymentType: "monthly" | "term" | "scholarship" | "registration"
+// ── Payment coverage logic ───────────────────────────────────────────────────
+// Returns the set of studentIds who are "covered" for a given YYYY-MM.
+// Monthly/scholarship: must have a payment in that exact month.
+// Term: covered for 3 months from the month of their last term payment.
+// Registration: never counts as monthly coverage.
+export function getCoveredStudentIds(allPayments, month) {
+  const [yr, mo] = month.split("-").map(Number);
+
+  // Build the 3-month window: month itself and the 2 months before it
+  const window = [month];
+  for (let i = 1; i <= 2; i++) {
+    let m = mo - i, y = yr;
+    if (m <= 0) { m += 12; y -= 1; }
+    window.push(`${y}-${String(m).padStart(2, "0")}`);
+  }
+
+  const covered = new Set();
+
+  allPayments.forEach((p) => {
+    if (p.paymentType === "registration") return;
+
+    if (p.paymentType === "monthly" || p.paymentType === "scholarship") {
+      if (p.month === month) covered.add(p.studentId);
+    } else if (p.paymentType === "term" || p.paymentType === "annual") {
+      // Term covers the payment month + next 2 months
+      if (window.includes(p.month)) covered.add(p.studentId);
+    }
+  });
+
+  return covered;
+}
+
+// Returns the term expiry month (inclusive) for a student's latest term payment
+// e.g. paid in 2025-03 → covered through 2025-05
+export function getTermExpiryMonth(allPayments, studentId) {
+  const termPmts = allPayments
+    .filter((p) => (p.paymentType === "term" || p.paymentType === "annual") && p.studentId === studentId)
+    .map((p) => p.month)
+    .sort()
+    .reverse();
+  if (termPmts.length === 0) return null;
+  const [yr, mo] = termPmts[0].split("-").map(Number);
+  let expMo = mo + 2, expYr = yr;
+  if (expMo > 12) { expMo -= 12; expYr += 1; }
+  return `${expYr}-${String(expMo).padStart(2, "0")}`;
+}
+
 export const recordPayment = (studentId, studentName, month, amount, location, paymentType = "monthly", deduction = 0) =>
   addDoc(collection(db, "payments"), {
     studentId, studentName, month, amount: Number(amount), location,

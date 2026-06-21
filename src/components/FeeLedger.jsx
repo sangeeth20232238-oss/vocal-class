@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Wallet, Search, CheckCircle, Clock, ChevronDown, ChevronUp, GraduationCap, Banknote, Receipt, Trash2, ClipboardList } from "lucide-react";
 import toast from "react-hot-toast";
-import { recordPayment, getPayments, deletePayment, parseFirebaseError, getRegisteredStudentIds } from "../firestoreService";
+import { recordPayment, getPayments, deletePayment, parseFirebaseError, getRegisteredStudentIds, getCoveredStudentIds, getTermExpiryMonth } from "../firestoreService";
 import { LOCATION_CLASS_GROUPS } from "../scheduleConfig";
 import ConfirmActionModal from "./ConfirmActionModal";
 
@@ -119,7 +119,7 @@ function PaidRow({ p, onDeleted }) {
 }
 
 // ── Quick-pay row in Pending list ─────────────────────────────────────────────
-function QuickPayRow({ student, month, onPaid, regPaid }) {
+function QuickPayRow({ student, month, onPaid, regPaid, termExpiry }) {
   const [open, setOpen]           = useState(false);
   const [payType, setPayType]     = useState("monthly");
   const [amount, setAmount]       = useState(String(MONTHLY_FEE));
@@ -191,6 +191,17 @@ function QuickPayRow({ student, month, onPaid, regPaid }) {
         <div className="px-4 py-1.5 bg-orange-50 border-t border-orange-100 flex items-center gap-1.5">
           <ClipboardList size={11} className="text-orange-500 shrink-0" />
           <span className="text-xs font-semibold text-orange-700">Registration fee not yet recorded — use the orange section above to add it.</span>
+        </div>
+      )}
+      {termExpiry && (
+        <div className="px-4 py-1.5 bg-indigo-50 border-t border-indigo-100 flex items-center gap-1.5">
+          <span className="text-xs font-semibold text-indigo-700">
+            {termExpiry < month ? (
+              `Previous term expired in ${new Date(termExpiry + "-01").toLocaleDateString("en-LK", { month: "long", year: "numeric" })}. Please collect next fee.`
+            ) : (
+              `Term fee paid — covered until ${new Date(termExpiry + "-01").toLocaleDateString("en-LK", { month: "long", year: "numeric" })}. No payment needed this month.`
+            )}
+          </span>
         </div>
       )}
 
@@ -443,12 +454,9 @@ export default function FeeLedger({ students, activeLocation }) {
     .filter((p) => p.month === month && (activeLocation === "All" || p.location === activeLocation))
     .sort((a, b) => (b.paidAt?.seconds || 0) - (a.paidAt?.seconds || 0));
 
-  // A student is "paid" only if they have a monthly/term/scholarship payment (registration alone doesn't count)
-  const paidIds = new Set(
-    monthPayments
-      .filter((p) => p.paymentType !== "registration")
-      .map((p) => p.studentId)
-  );
+  // A student is "covered" for this month using the shared term-aware logic
+  const paidIds = getCoveredStudentIds(payments, month);
+  // Further filter to only location-relevant payments for display stats
   const pending            = eligibleStudents.filter((s) => !paidIds.has(s.id));
   const total              = monthPayments.reduce((sum, p) => sum + Number(p.amount), 0);
   const termPmts           = monthPayments.filter((p) => p.paymentType === "term");
@@ -658,7 +666,19 @@ export default function FeeLedger({ students, activeLocation }) {
           </div>
         ) : (
           <ul className="space-y-2 sm:space-y-3">
-            {pending.map((s) => <QuickPayRow key={s.id} student={s} month={month} onPaid={loadPayments} regPaid={regPaidIds.has(s.id)} />)}
+            {pending.map((s) => {
+              const termExpiry = getTermExpiryMonth(payments, s.id);
+              return (
+                <QuickPayRow
+                  key={s.id}
+                  student={s}
+                  month={month}
+                  onPaid={loadPayments}
+                  regPaid={regPaidIds.has(s.id)}
+                  termExpiry={termExpiry}
+                />
+              );
+            })}
           </ul>
         )}
       </div>
@@ -670,8 +690,8 @@ export default function FeeLedger({ students, activeLocation }) {
           Paid — {month}
           <span className="badge bg-green-200 text-green-800 ml-auto">{paidIds.size} student{paidIds.size !== 1 ? "s" : ""}</span>
         </div>
-        {monthPayments.length === 0 ? (
-          <p className="text-slate-400 text-sm text-center py-4">No payments recorded yet.</p>
+        {paidIds.size === 0 && monthPayments.length === 0 ? (
+          <p className="text-slate-400 text-sm text-center py-4">No payments or covered status recorded yet.</p>
         ) : (
           <>
             <p className="text-xs text-slate-400 mb-3 flex items-center gap-1">
@@ -680,13 +700,24 @@ export default function FeeLedger({ students, activeLocation }) {
             <ul className="space-y-3">
               {/* Group payments by student */}
               {Array.from(
-                monthPayments.reduce((map, p) => {
-                  if (!map.has(p.studentId)) map.set(p.studentId, { name: p.studentName, main: [], reg: [] });
-                  const entry = map.get(p.studentId);
-                  if (p.paymentType === "registration") entry.reg.push(p);
-                  else entry.main.push(p);
+                (() => {
+                  const map = monthPayments.reduce((acc, p) => {
+                    if (!acc.has(p.studentId)) acc.set(p.studentId, { name: p.studentName, main: [], reg: [] });
+                    const entry = acc.get(p.studentId);
+                    if (p.paymentType === "registration") entry.reg.push(p);
+                    else entry.main.push(p);
+                    return acc;
+                  }, new Map());
+
+                  // Add covered students who don't have a payment recorded in this specific month
+                  eligibleStudents.forEach((s) => {
+                    if (paidIds.has(s.id) && !map.has(s.id)) {
+                      map.set(s.id, { name: s.name, main: [], reg: [] });
+                    }
+                  });
+
                   return map;
-                }, new Map())
+                })()
               ).map(([sid, { name, main, reg }]) => (
                 <li key={sid} className="bg-white rounded-xl border border-green-100 overflow-hidden">
                   <div className="px-3 py-2 bg-green-50 border-b border-green-100 flex items-center gap-2">
@@ -706,12 +737,27 @@ export default function FeeLedger({ students, activeLocation }) {
                         <ClipboardList size={9} /> Reg unpaid
                       </span>
                     )}
+                    {(() => {
+                      const expiry = getTermExpiryMonth(payments, sid);
+                      if (!expiry) return null;
+                      const expiryLabel = new Date(expiry + "-01").toLocaleDateString("en-LK", { month: "long", year: "numeric" });
+                      return (
+                        <span className="badge bg-indigo-100 text-indigo-700 text-xs ml-1">
+                          Term until {expiryLabel}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <ul className="divide-y divide-green-50">
                     {main.map((p) => <PaidRow key={p.id} p={p} onDeleted={loadPayments} />)}
                     {reg.map((p) => (
                       <PaidRow key={p.id} p={p} onDeleted={loadPayments} />
                     ))}
+                    {main.length === 0 && reg.length === 0 && (
+                      <li className="py-2.5 px-3 flex justify-between items-center text-xs text-indigo-700 font-semibold bg-indigo-50/50">
+                        <span className="flex items-center gap-1">🗓️ Covered by Term Fee (no payment needed this month)</span>
+                      </li>
+                    )}
                   </ul>
                 </li>
               ))}

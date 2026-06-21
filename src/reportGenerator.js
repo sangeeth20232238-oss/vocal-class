@@ -1,6 +1,7 @@
 // src/reportGenerator.js
 import * as XLSX from "xlsx";
 import { getScheduledDates, LOCATION_CLASS_GROUPS } from "./scheduleConfig";
+import { getCoveredStudentIds } from "./firestoreService";
 
 const fmtDate = (ts) => {
   if (!ts?.seconds) return "—";
@@ -25,7 +26,6 @@ const getClassGroupLabel = (location, groupId) => {
   return groups.find((g) => g.id === groupId)?.label || groupId;
 };
 
-// Sort students by their class group order for a location
 const sortByClassGroup = (studentList, location) => {
   const groups = LOCATION_CLASS_GROUPS[location] || [];
   return [...studentList].sort((a, b) => {
@@ -37,6 +37,7 @@ const sortByClassGroup = (studentList, location) => {
 
 export function generateMonthlyReport(month, students, attendanceData, payments, locations, progressNotes = []) {
   const wb = XLSX.utils.book_new();
+  const today = new Date().toISOString().split("T")[0];
 
   // ── Sheet 1: Summary ──────────────────────────────────────────────────────
   const summaryRows = [
@@ -49,15 +50,15 @@ export function generateMonthlyReport(month, students, attendanceData, payments,
   ];
 
   let grandTotal = 0;
-  const today = new Date().toISOString().split("T")[0];
 
   locations.forEach((loc) => {
-    const locStudents    = students.filter((s) => s.location === loc);
-    const scheduledDates = getScheduledDates(loc, month);
-    const passedDates    = scheduledDates.filter((d) => d <= today);
-    const locGroups      = LOCATION_CLASS_GROUPS[loc] || [];
+    const locStudents      = students.filter((s) => s.location === loc);
+    const allLocPayments   = payments.filter((p) => p.location === loc); // all-time for term window
+    const monthLocPayments = allLocPayments.filter((p) => p.month === month);
+    const scheduledDates   = getScheduledDates(loc, month);
+    const passedDates      = scheduledDates.filter((d) => d <= today);
+    const locGroups        = LOCATION_CLASS_GROUPS[loc] || [];
 
-    // One summary row per class group
     const groupsToShow = locGroups.length > 0 ? locGroups : [{ id: "", label: "All" }];
     groupsToShow.forEach((g) => {
       const groupStudents = g.id
@@ -74,15 +75,19 @@ export function generateMonthlyReport(month, students, attendanceData, payments,
         });
       });
 
-      const groupIds       = new Set(groupStudents.map((s) => s.id));
-      const groupPayments  = payments.filter((p) => p.month === month && p.location === loc && groupIds.has(p.studentId));
-      const monthlyFees    = groupPayments.filter((p) => p.paymentType === "monthly").reduce((s, p) => s + Number(p.amount), 0);
-      const termFees       = groupPayments.filter((p) => p.paymentType === "term" || p.paymentType === "annual").reduce((s, p) => s + Number(p.amount), 0);
-      const regFees        = groupPayments.filter((p) => p.paymentType === "registration").reduce((s, p) => s + Number(p.amount), 0);
-      const scholarCount   = groupPayments.filter((p) => p.paymentType === "scholarship").length;
+      const groupIds      = new Set(groupStudents.map((s) => s.id));
+      // Use month-only payments for fee totals (what was collected this month)
+      const groupMonthPay = monthLocPayments.filter((p) => groupIds.has(p.studentId));
+      const monthlyFees   = groupMonthPay.filter((p) => p.paymentType === "monthly").reduce((s, p) => s + Number(p.amount), 0);
+      const termFees      = groupMonthPay.filter((p) => p.paymentType === "term" || p.paymentType === "annual").reduce((s, p) => s + Number(p.amount), 0);
+      const regFees       = groupMonthPay.filter((p) => p.paymentType === "registration").reduce((s, p) => s + Number(p.amount), 0);
+      const scholarCount  = groupMonthPay.filter((p) => p.paymentType === "scholarship").length;
       const totalCollected = monthlyFees + termFees + regFees;
-      const paidIds        = new Set(groupPayments.filter((p) => p.paymentType !== "registration").map((p) => p.studentId));
-      const pendingCount   = groupStudents.filter((s) => !paidIds.has(s.id)).length;
+
+      // Use all-time payments for coverage (term window spans 3 months)
+      const groupAllPay   = allLocPayments.filter((p) => groupIds.has(p.studentId));
+      const coveredIds    = getCoveredStudentIds(groupAllPay, month);
+      const pendingCount  = groupStudents.filter((s) => !coveredIds.has(s.id)).length;
 
       grandTotal += totalCollected;
 
@@ -137,8 +142,9 @@ export function generateMonthlyReport(month, students, attendanceData, payments,
 
   // ── Per location: Payments sheet ─────────────────────────────────────────
   locations.forEach((loc) => {
-    const locStudents = students.filter((s) => s.location === loc);
-    const locPayments = payments.filter((p) => p.month === month && p.location === loc);
+    const locStudents      = students.filter((s) => s.location === loc);
+    const allLocPayments   = payments.filter((p) => p.location === loc);
+    const monthLocPayments = allLocPayments.filter((p) => p.month === month);
 
     const payRows = [
       [`${loc} — Payments — ${monthLabel(month)}`],
@@ -146,8 +152,7 @@ export function generateMonthlyReport(month, students, attendanceData, payments,
       ["Class Group", "Student Name", "Payment Type", "Amount (Rs.)", "Deduction (Rs.)", "Net Paid (Rs.)", "Date Paid"],
     ];
 
-    // Sort payments by student class group
-    const sortedPayments = [...locPayments].sort((a, b) => {
+    const sortedPayments = [...monthLocPayments].sort((a, b) => {
       const as = students.find((s) => s.id === a.studentId);
       const bs = students.find((s) => s.id === b.studentId);
       const groups = LOCATION_CLASS_GROUPS[loc] || [];
@@ -170,17 +175,17 @@ export function generateMonthlyReport(month, students, attendanceData, payments,
       ]);
     });
 
-    const total = locPayments.filter((p) => p.paymentType !== "scholarship").reduce((s, p) => s + Number(p.amount), 0);
+    const total = monthLocPayments.filter((p) => p.paymentType !== "scholarship").reduce((s, p) => s + Number(p.amount), 0);
     payRows.push([]);
     payRows.push(["TOTAL COLLECTED (excl. scholarships)", "", "", "", "", total, ""]);
 
-    // Pending = no monthly/term/scholarship payment
-    const paidIds = new Set(locPayments.filter((p) => p.paymentType !== "registration").map((p) => p.studentId));
-    const pending = sortByClassGroup(locStudents.filter((s) => !paidIds.has(s.id)), loc);
+    // Term-aware pending: use all-time payments so 3-month window works
+    const coveredIds = getCoveredStudentIds(allLocPayments, month);
+    const pending    = sortByClassGroup(locStudents.filter((s) => !coveredIds.has(s.id)), loc);
     if (pending.length > 0) {
       payRows.push([]);
-      payRows.push(["PENDING STUDENTS"]);
-      pending.forEach((s) => payRows.push([getClassGroupLabel(loc, s.classGroup), s.name, "Not paid", "", "", "", ""]));
+      payRows.push(["PENDING STUDENTS (not covered this month)"]);
+      pending.forEach((s) => payRows.push([getClassGroupLabel(loc, s.classGroup), s.name, "Not covered", "", "", "", ""]));
     }
 
     const wsPay = XLSX.utils.aoa_to_sheet(payRows);
@@ -230,25 +235,25 @@ export function generateEmailSummary(month, students, attendanceData, payments, 
   let grandTotal = 0;
 
   locations.forEach((loc) => {
-    const locStudents    = students.filter((s) => s.location === loc);
-    const scheduledDates = getScheduledDates(loc, month);
-    const passedDates    = scheduledDates.filter((d) => d <= today);
-    const locPayments    = payments.filter((p) => p.month === month && p.location === loc);
-    const totalCollected = locPayments.filter((p) => p.paymentType !== "scholarship").reduce((s, p) => s + Number(p.amount), 0);
-    const scholarCount   = locPayments.filter((p) => p.paymentType === "scholarship").length;
-    const paidIds        = new Set(locPayments.filter((p) => p.paymentType !== "registration").map((p) => p.studentId));
-    const pendingNames   = locStudents.filter((s) => !paidIds.has(s.id)).map((s) => s.name);
+    const locStudents      = students.filter((s) => s.location === loc);
+    const allLocPayments   = payments.filter((p) => p.location === loc);
+    const monthLocPayments = allLocPayments.filter((p) => p.month === month);
+    const scheduledDates   = getScheduledDates(loc, month);
+    const passedDates      = scheduledDates.filter((d) => d <= today);
+    const totalCollected   = monthLocPayments.filter((p) => p.paymentType !== "scholarship").reduce((s, p) => s + Number(p.amount), 0);
+    const scholarCount     = monthLocPayments.filter((p) => p.paymentType === "scholarship").length;
+    const coveredIds       = getCoveredStudentIds(allLocPayments, month);
+    const pendingNames     = locStudents.filter((s) => !coveredIds.has(s.id)).map((s) => s.name);
 
     grandTotal += totalCollected;
 
     body += `${loc} (${locStudents.length} students | ${passedDates.length} classes held)\n`;
 
-    // Break down by class group
     const locGroups = LOCATION_CLASS_GROUPS[loc] || [];
     locGroups.forEach((g) => {
       const gStudents = locStudents.filter((s) => s.classGroup === g.id);
       if (gStudents.length === 0) return;
-      const gPaid    = gStudents.filter((s) => paidIds.has(s.id)).length;
+      const gPaid    = gStudents.filter((s) => coveredIds.has(s.id)).length;
       const gPending = gStudents.length - gPaid;
       body += `   ${g.label}: ${gStudents.length} students`;
       body += gPending > 0 ? ` — ${gPending} pending\n` : ` — all paid ✓\n`;

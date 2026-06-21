@@ -1,7 +1,7 @@
 // src/components/Dashboard.jsx
 import { useState, useEffect, useCallback } from "react";
 import { LayoutDashboard, TrendingUp, MapPin, Calendar, Bell, FileSpreadsheet, Users, BookOpen, Banknote, Clock, CheckCircle2, ClipboardList } from "lucide-react";
-import { getAttendanceForMonth, getPayments, getRegisteredStudentIds } from "../firestoreService";
+import { getAttendanceForMonth, getPayments, getRegisteredStudentIds, getCoveredStudentIds } from "../firestoreService";
 import { getScheduledDates, LOCATION_SCHEDULE } from "../scheduleConfig";
 import MonthlyReportButton from "./MonthlyReportButton";
 
@@ -57,7 +57,7 @@ export default function Dashboard({ students, locations, activeLocation, onLocat
   }).sort((a, b) => b.rate - a.rate);
 
   const monthPayments     = payments.filter((p) => p.month === month && p.location === activeLocation);
-  const paidIds           = new Set(monthPayments.filter((p) => p.paymentType !== "registration").map((p) => p.studentId));
+  const paidIds           = getCoveredStudentIds(payments.filter((p) => p.location === activeLocation), month);
   const pendingCount      = locationStudents.filter((s) => !paidIds.has(s.id)).length;
   const unregisteredCount = locationStudents.filter((s) => !regPaidIds.has(s.id)).length;
   const annualTotal       = monthPayments.filter((p) => p.paymentType === "annual" || p.paymentType === "term").reduce((s, p) => s + Number(p.amount), 0);
@@ -300,7 +300,7 @@ export default function Dashboard({ students, locations, activeLocation, onLocat
             const locStudents = students.filter((s) => s.location === loc);
             const locPaid     = payments.filter((p) => p.month === month && p.location === loc);
             const locTotal    = locPaid.reduce((sum, p) => sum + Number(p.amount), 0);
-            const locPaidIds  = new Set(locPaid.filter((p) => p.paymentType !== "registration").map((p) => p.studentId));
+            const locPaidIds  = getCoveredStudentIds(payments.filter((p) => p.location === loc), month);
             const locPending  = locStudents.filter((s) => !locPaidIds.has(s.id)).length;
             const feeRate     = locStudents.length > 0 ? Math.round((locPaidIds.size / locStudents.length) * 100) : 0;
             const locSched    = LOCATION_SCHEDULE[loc];
